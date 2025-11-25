@@ -56,6 +56,9 @@ defmodule EducationCrmWeb.Router do
     post "/auth/refresh", AuthController, :refresh
     post "/auth/logout", AuthController, :logout
 
+    # Health check
+    get "/health", HealthController, :index
+
     # Lead endpoints (requires authentication)
     get "/leads", LeadController, :index
     get "/leads/:id", LeadController, :show
