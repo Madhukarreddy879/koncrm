@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  traefik:
+    image: "traefik:v2.10"
+    container_name: "traefik"
+    command:
+      #- "--log.level=DEBUG"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.myresolver.acme.httpchallenge=true"
+      - "--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web"
+      #- "--certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory" # Uncomment for testing
+      - "--certificatesresolvers.myresolver.acme.email=${LETSENCRYPT_EMAIL}"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - "./letsencrypt:/letsencrypt"
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+
+  app:
+    build: .
+    image: education_crm:latest
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - PHX_HOST=snvs.dpdns.org
+      - PORT=4000
+      - DATABASE_URL=ecto://postgres:postgres@postgres/education_crm_prod
+      - SECRET_KEY_BASE=${SECRET_KEY_BASE}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app.rule=Host(`snvs.dpdns.org`)"
+      - "traefik.http.routers.app.entrypoints=websecure"
+      - "traefik.http.routers.app.tls.certresolver=myresolver"
+      - "traefik.http.services.app.loadbalancer.server.port=4000"
+      # Middleware to redirect HTTP to HTTPS
+      - "traefik.http.routers.app-http.rule=Host(`snvs.dpdns.org`)"
+      - "traefik.http.routers.app-http.entrypoints=web"
+      - "traefik.http.routers.app-http.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: education_crm_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: education_crm_prod
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
