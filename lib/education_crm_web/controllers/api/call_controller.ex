@@ -127,7 +127,7 @@ defmodule EducationCrmWeb.Api.CallController do
 
           case S3Service.presigned_put_url(key, content_type) do
             {:ok, upload_url} ->
-              public_url = S3Service.public_url(key)
+              public_url = S3Service.format_key(key)
               
               conn
               |> json(%{
