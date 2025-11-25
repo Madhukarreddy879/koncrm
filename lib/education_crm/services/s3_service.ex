@@ -36,15 +36,27 @@ defmodule EducationCrm.Services.S3Service do
   end
 
   @doc """
-  Generates a public URL for reading a file.
+  Generates a presigned URL for reading a file.
   """
-  def public_url(key) do
+  def presigned_get_url(key) do
     if Application.get_env(:education_crm, :environment) == :prod do
-      "https://#{bucket()}.s3.amazonaws.com/#{key}"
+      # Generate presigned GET URL
+      opts = [expires_in: 3600]
+      
+      case ExAws.S3.presigned_url(ExAws.Config.new(:s3), :get, bucket(), key, opts) do
+        {:ok, url} -> {:ok, url}
+        {:error, reason} -> {:error, reason}
+      end
     else
-      EducationCrmWeb.Endpoint.url() <> "/uploads/" <> key
+      # Local development
+      {:ok, EducationCrmWeb.Endpoint.url() <> "/uploads/" <> key}
     end
   end
+
+  @doc """
+  Returns the S3 key format.
+  """
+  def format_key(key), do: "s3:#{key}"
 
   defp bucket do
     System.get_env("AWS_BUCKET_NAME") || "education-crm-uploads"

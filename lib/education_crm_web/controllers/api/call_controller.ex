@@ -361,7 +361,8 @@ defmodule EducationCrmWeb.Api.CallController do
       {:ok, _lead} ->
         # For S3 uploads, we just attach the public URL (or key) to the call log
         # In a real app, we might want to verify the file exists on S3 first
-        file_path = S3Service.public_url(s3_key)
+        # Store the S3 key with a prefix so we know it's an S3 file
+        file_path = S3Service.format_key(s3_key)
         handle_recording_attachment(conn, call_log_id, file_path)
 
       {:error, status, error} ->
@@ -447,6 +448,23 @@ defmodule EducationCrmWeb.Api.CallController do
                 message: "Recording not found"
               }
             })
+
+          %{recording_path: "s3:" <> key} ->
+            # It's an S3 file, generate presigned URL and redirect
+            case S3Service.presigned_get_url(key) do
+              {:ok, url} ->
+                redirect(conn, external: url)
+              
+              {:error, _reason} ->
+                conn
+                |> put_status(:internal_server_error)
+                |> json(%{
+                  error: %{
+                    code: "SERVER_ERROR",
+                    message: "Failed to generate playback URL"
+                  }
+                })
+            end
 
           %{recording_path: path} ->
             if File.exists?(path) do
