@@ -32,6 +32,7 @@ services:
       - .env
     environment:
       - PHX_HOST=snvs.dpdns.org
+      - PHX_SERVER=true
       - PORT=4000
       - DATABASE_URL=ecto://postgres:postgres@postgres/education_crm_prod
       - SECRET_KEY_BASE=${SECRET_KEY_BASE}
