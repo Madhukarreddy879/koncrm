@@ -13,6 +13,24 @@ defmodule EducationCrm.Release do
     end
   end
 
+  def seed do
+    load_app()
+
+    for repo <- repos() do
+      {:ok, _, _} = Ecto.Migrator.with_repo(repo, fn _repo ->
+        priv_dir = Application.app_dir(@app, "priv")
+        seed_file = Path.join([priv_dir, "repo", "seeds.exs"])
+
+        if File.exists?(seed_file) do
+          IO.puts "Running seed file: #{seed_file}"
+          Code.eval_file(seed_file)
+        else
+          IO.puts "No seeds.exs file found at #{seed_file}"
+        end
+      end)
+    end
+  end
+
   def rollback(repo, version) do
     load_app()
     {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :down, to: version))
