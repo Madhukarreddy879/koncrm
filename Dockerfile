@@ -36,6 +36,7 @@ ENV MIX_ENV="prod"
 # install mix dependencies
 COPY mix.exs mix.lock ./
 RUN mix deps.get --only $MIX_ENV
+COPY config config
 RUN mix deps.compile
 
 # build assets
@@ -47,9 +48,7 @@ RUN mix assets.deploy
 # compile the release
 RUN mix compile
 
-# Changes to config/runtime.exs don't require recompiling the code
-COPY config/runtime.exs config/
-COPY config/prod.exs config/
+
 
 RUN mix release
 
