@@ -70,26 +70,29 @@ class AudioRecorderModule(reactContext: ReactApplicationContext) : ReactContextB
     @ReactMethod
     fun stopRecording(promise: Promise) {
         try {
+            // Check if recording is in progress before stopping
+            if (mediaRecorder == null || recordingFilePath == null) {
+                promise.reject("RECORDING_ERROR", "No recording in progress")
+                return
+            }
+            
             val duration = (System.currentTimeMillis() - recordingStartTime) / 1000.0
-            val filePath = recordingFilePath
+            val filePath = recordingFilePath!!
+            val startTime = recordingStartTime
             
             stopRecordingInternal()
             
-            if (filePath != null) {
-                val file = File(filePath)
-                val fileSize = if (file.exists()) file.length() else 0L
-                
-                val result = Arguments.createMap().apply {
-                    putString("filePath", filePath)
-                    putDouble("duration", duration)
-                    putDouble("fileSize", fileSize.toDouble())
-                    putDouble("timestamp", recordingStartTime.toDouble())
-                }
-                
-                promise.resolve(result)
-            } else {
-                promise.reject("RECORDING_ERROR", "No recording in progress")
+            val file = File(filePath)
+            val fileSize = if (file.exists()) file.length() else 0L
+            
+            val result = Arguments.createMap().apply {
+                putString("filePath", filePath)
+                putDouble("duration", duration)
+                putDouble("fileSize", fileSize.toDouble())
+                putDouble("timestamp", startTime.toDouble())
             }
+            
+            promise.resolve(result)
         } catch (e: Exception) {
             promise.reject("RECORDING_ERROR", "Failed to stop recording: ${e.message}", e)
         }

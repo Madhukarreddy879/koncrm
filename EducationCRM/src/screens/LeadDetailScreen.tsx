@@ -94,6 +94,29 @@ export default function LeadDetailScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    // Sync recording state with CallRecordingManager
+    // Check every second if recording is still active
+    const interval = setInterval(() => {
+      const isActuallyRecording = CallRecordingManager.isRecording();
+      if (isRecording !== isActuallyRecording) {
+        setIsRecording(isActuallyRecording);
+        if (!isActuallyRecording) {
+          // Recording was stopped externally, clean up timer
+          if (recordingTimer) {
+            clearInterval(recordingTimer);
+            setRecordingTimer(null);
+          }
+          setRecordingDuration(0);
+        }
+      }
+    }, 1000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [isRecording, recordingTimer]);
+
   const fetchLeadDetails = async () => {
     try {
       setIsLoading(true);
@@ -228,6 +251,18 @@ export default function LeadDetailScreen() {
 
   const handleStopRecording = async () => {
     try {
+      // Check if recording is actually in progress
+      if (!CallRecordingManager.isRecording()) {
+        showToast('No recording in progress');
+        setIsRecording(false);
+        setRecordingDuration(0);
+        if (recordingTimer) {
+          clearInterval(recordingTimer);
+          setRecordingTimer(null);
+        }
+        return;
+      }
+
       // Stop the timer
       if (recordingTimer) {
         clearInterval(recordingTimer);
