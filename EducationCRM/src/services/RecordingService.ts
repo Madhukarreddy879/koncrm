@@ -1,6 +1,8 @@
-import { Platform } from 'react-native';
+import { Platform, NativeModules } from 'react-native';
 import RNFS from 'react-native-blob-util';
 import SettingsService from './SettingsService';
+
+const { AudioRecorderModule } = NativeModules;
 
 /**
  * RecordingMetadata - Information about a completed recording
@@ -20,7 +22,6 @@ class RecordingService {
   private isRecording: boolean = false;
   private recordingStartTime: number = 0;
   private currentRecordingPath: string | null = null;
-  private mediaRecorder: any = null; // Will hold the AudioRecorder instance
 
   /**
    * Generates a unique file path for storing recordings
@@ -28,7 +29,7 @@ class RecordingService {
    */
   private generateRecordingPath(): string {
     const timestamp = Date.now();
-    const filename = `recording_${timestamp}.aac`;
+    const filename = `recording_${timestamp}.m4a`;
     const cacheDir =
       Platform.OS === 'android'
         ? RNFS.fs.dirs.CacheDir
@@ -36,20 +37,7 @@ class RecordingService {
     return `${cacheDir}/${filename}`;
   }
 
-  /**
-   * Gets the file size of a recording
-   * @param filePath - Path to the recording file
-   * @returns File size in bytes
-   */
-  private async getFileSize(filePath: string): Promise<number> {
-    try {
-      const stat = await RNFS.fs.stat(filePath);
-      return stat.size;
-    } catch (error) {
-      console.error('Error getting file size:', error);
-      return 0;
-    }
-  }
+
 
   /**
    * Starts audio recording
@@ -69,15 +57,14 @@ class RecordingService {
       const qualityConfig = SettingsService.getRecordingQualityConfig();
       console.log('Recording with quality config:', qualityConfig);
 
-      // Create a dummy file for now to test the upload flow
-      // In a real app, we would use react-native-audio-api or similar here
-      await RNFS.fs.writeFile(
+      // Start recording using native module
+      await AudioRecorderModule.startRecording(
         this.currentRecordingPath,
-        'Dummy audio content for testing upload flow',
-        'utf8'
+        qualityConfig.sampleRate,
+        qualityConfig.bitrate
       );
 
-      // For now, we'll track the recording state
+      // Track recording state
       this.isRecording = true;
       this.recordingStartTime = Date.now();
 
@@ -103,24 +90,14 @@ class RecordingService {
     }
 
     try {
-      // Stop the media recorder
-      // In real implementation:
-      // if (this.mediaRecorder) {
-      //   this.mediaRecorder.stop();
-      //   this.mediaRecorder = null;
-      // }
-
-      const duration = (Date.now() - this.recordingStartTime) / 1000; // Convert to seconds
-      const filePath = this.currentRecordingPath;
-
-      // Get file size
-      const fileSize = await this.getFileSize(filePath);
+      // Stop recording using native module
+      const result = await AudioRecorderModule.stopRecording();
 
       const metadata: RecordingMetadata = {
-        filePath,
-        duration,
-        fileSize,
-        timestamp: this.recordingStartTime,
+        filePath: result.filePath,
+        duration: result.duration,
+        fileSize: result.fileSize,
+        timestamp: result.timestamp,
       };
 
       // Reset state
@@ -152,16 +129,8 @@ class RecordingService {
     }
 
     try {
-      // Stop recording
-      if (this.mediaRecorder) {
-        this.mediaRecorder = null;
-      }
-
-      // Delete the recording file
-      const filePath = this.currentRecordingPath;
-      if (await RNFS.fs.exists(filePath)) {
-        await RNFS.fs.unlink(filePath);
-      }
+      // Cancel recording using native module (stops and deletes file)
+      await AudioRecorderModule.cancelRecording();
 
       // Reset state
       this.isRecording = false;
