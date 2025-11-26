@@ -8,6 +8,8 @@ import java.io.IOException
 
 class AudioRecorderModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
     
+    private var recordingFilePath: String? = null
+    
     override fun getName(): String {
         return "AudioRecorderModule"
     }
@@ -16,6 +18,8 @@ class AudioRecorderModule(reactContext: ReactApplicationContext) : ReactContextB
     fun startRecording(filePath: String, sampleRate: Int, bitRate: Int, promise: Promise) {
         try {
             android.util.Log.d("AudioRecorder", "startRecording called with filePath: $filePath")
+            
+            recordingFilePath = filePath
             
             val intent = android.content.Intent(reactApplicationContext, RecordingService::class.java).apply {
                 action = RecordingService.ACTION_START_RECORDING
@@ -49,21 +53,28 @@ class AudioRecorderModule(reactContext: ReactApplicationContext) : ReactContextB
                 return
             }
             
+            val filePath = recordingFilePath
+            
             // Stop the service
             val intent = android.content.Intent(reactApplicationContext, RecordingService::class.java).apply {
                 action = RecordingService.ACTION_STOP_RECORDING
             }
             reactApplicationContext.startService(intent)
             
+            // Calculate file size
+            var fileSize = 0.0
+            if (filePath != null) {
+                val file = java.io.File(filePath)
+                if (file.exists()) {
+                    fileSize = file.length().toDouble()
+                }
+            }
+            
             // Return metadata
-            // Note: We can't easily get the exact file size here since the service might still be writing
-            // But for UI purposes, we can estimate or check the file
             val result = Arguments.createMap().apply {
-                // We assume the file path passed in startRecording is valid
-                // Since we don't store it here anymore, we might need to rely on the caller knowing it
-                // OR we could expose it from the service. 
-                // For simplicity, we'll return basic stats.
+                putString("filePath", filePath)
                 putDouble("duration", duration)
+                putDouble("fileSize", fileSize)
                 putDouble("timestamp", System.currentTimeMillis().toDouble())
             }
             
