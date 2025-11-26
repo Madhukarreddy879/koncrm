@@ -52,30 +52,35 @@ class CallRecordingManager {
       // Step 2: Store lead ID for later use
       this.currentLeadId = leadId;
 
-      // Step 3: Start recording if auto-record is enabled and permission granted
+      // Step 3: Initiate the call FIRST
+      await CallHelper.initiateCall(phoneNumber);
+
+      // Step 4: Set up app state listener to detect when user returns
+      this.setupAppStateListener();
+
+      // Step 5: Log call attempt
+      await this.logCallAttempt(leadId);
+
+      // Step 6: Start recording AFTER call is initiated (with delay)
+      // This gives time for the call to connect and avoids recording pre-call time
       if (autoRecord && permissionsGranted.recording) {
-        try {
-          await this.startRecording();
-        } catch (error) {
-          console.error('Failed to start recording:', error);
-          // Continue with call even if recording fails
-          ErrorMessageService.handleError(error, false, 
-            'Unable to start recording, but call will proceed. You can manually start recording after the call begins.'
-          );
-        }
+        // Wait 2 seconds for call to connect before starting recording
+        setTimeout(async () => {
+          try {
+            // Only start if we're still in a call (app went to background)
+            if (this.appWentToBackground) {
+              await this.startRecording();
+              console.log('[CallRecording] Recording started after call connection');
+            }
+          } catch (error) {
+            console.error('[CallRecording] Failed to start delayed recording:', error);
+            // Don't show error to user as call is already in progress
+          }
+        }, 2000);
       } else if (autoRecord && !permissionsGranted.recording) {
         // Show notice about recording permission
         ErrorMessageService.showRecordingPermissionDenied();
       }
-
-      // Step 4: Initiate the call
-      await CallHelper.initiateCall(phoneNumber);
-
-      // Step 5: Set up app state listener to detect when user returns
-      this.setupAppStateListener();
-
-      // Step 6: Log call attempt
-      await this.logCallAttempt(leadId);
     } catch (error) {
       // Clean up on error
       await this.cleanup();
