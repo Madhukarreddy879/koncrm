@@ -44,8 +44,16 @@ class AudioRecorderModule(reactContext: ReactApplicationContext) : ReactContextB
             mediaRecorder?.apply {
                 android.util.Log.d("AudioRecorder", "Configuring MediaRecorder")
                 
-                // Set audio source (MIC for microphone)
-                setAudioSource(MediaRecorder.AudioSource.MIC)
+                // Set audio source - use VOICE_CALL for Android 10+ to capture call audio
+                // Falls back to MIC for older versions
+                val audioSource = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    android.util.Log.d("AudioRecorder", "Using VOICE_CALL audio source (Android 10+)")
+                    MediaRecorder.AudioSource.VOICE_CALL
+                } else {
+                    android.util.Log.d("AudioRecorder", "Using MIC audio source (Android < 10)")
+                    MediaRecorder.AudioSource.MIC
+                }
+                setAudioSource(audioSource)
                 
                 // Set output format (AAC in MP4 container)
                 setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
