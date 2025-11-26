@@ -20,18 +20,18 @@ defmodule EducationCrmWeb.Admin.ImportLive.New do
       |> assign(:uploaded_file, nil)
       |> assign(:import_result, nil)
       |> assign(:importing, false)
-      |> allow_upload(:csv, accept: ~w(.csv), max_entries: 1, max_file_size: 10_000_000)
+      |> allow_upload(:csv,
+        accept: ~w(.csv),
+        max_entries: 1,
+        max_file_size: 10_000_000,
+        auto_upload: true
+      )
 
     {:ok, socket}
   end
 
   @impl true
-  def handle_event("validate", _params, socket) do
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_event("select_branch", %{"branch_id" => branch_id}, socket) do
+  def handle_event("validate", %{"branch_id" => branch_id} = _params, socket) do
     branch_id = if branch_id == "", do: nil, else: branch_id
 
     telecallers =
@@ -49,6 +49,12 @@ defmodule EducationCrmWeb.Admin.ImportLive.New do
 
     {:noreply, socket}
   end
+
+  def handle_event("validate", _params, socket) do
+    {:noreply, socket}
+  end
+
+
 
   @impl true
   def handle_event("toggle_telecaller", %{"id" => id}, socket) do
@@ -84,11 +90,30 @@ defmodule EducationCrmWeb.Admin.ImportLive.New do
       socket.assigns.selected_telecaller_ids == [] ->
         {:noreply, put_flash(socket, :error, "Please select at least one telecaller")}
 
-      socket.assigns.uploaded_files[:csv] == [] ->
+      socket.assigns.uploads.csv.entries == [] ->
         {:noreply, put_flash(socket, :error, "Please upload a CSV file")}
 
+      not Enum.all?(socket.assigns.uploads.csv.entries, & &1.done?) ->
+        {:noreply, put_flash(socket, :error, "Please wait for file upload to complete")}
+
       true ->
-        socket = assign(socket, :importing, true)
+        # Process all uploaded entries
+        uploaded_files =
+          consume_uploaded_entries(socket, :csv, fn %{path: path}, entry ->
+            dest = Path.join(System.tmp_dir!(), "#{entry.uuid}.csv")
+            File.cp!(path, dest)
+            {:ok, %{path: dest, client_name: entry.client_name}}
+          end)
+
+        socket =
+          case uploaded_files do
+            [uploaded_file | _] ->
+              process_import(socket, uploaded_file)
+
+            [] ->
+              put_flash(socket, :error, "Failed to process uploaded file")
+          end
+
         {:noreply, socket}
     end
   end
@@ -128,21 +153,8 @@ defmodule EducationCrmWeb.Admin.ImportLive.New do
     end
   end
 
-  def handle_progress(:csv, entry, socket) when entry.done? do
-    uploaded_file =
-      consume_uploaded_entry(socket, entry, fn %{path: path} ->
-        # Copy to a temporary location
-        dest = Path.join(System.tmp_dir!(), "#{entry.uuid}.csv")
-        File.cp!(path, dest)
-        {:ok, %{path: dest, client_name: entry.client_name}}
-      end)
-
-    socket = process_import(socket, uploaded_file)
-
-    {:noreply, socket}
-  end
-
   def handle_progress(:csv, _entry, socket) do
+    # Just track progress, actual processing happens on button click
     {:noreply, socket}
   end
 
@@ -157,8 +169,9 @@ defmodule EducationCrmWeb.Admin.ImportLive.New do
         </h1>
         <p class="text-gray-600 mt-1">Upload CSV file and assign to telecallers</p>
       </div>
-      
+
     <!-- Import Form -->
+      <form phx-change="validate" phx-submit="import" id="import-form">
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Left Column: Upload and Selection -->
         <div class="space-y-6">
@@ -166,7 +179,6 @@ defmodule EducationCrmWeb.Admin.ImportLive.New do
           <div class="bg-white rounded-2xl shadow-lg p-6 border border-purple-100">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">1. Select Branch</h2>
             <select
-              phx-change="select_branch"
               name="branch_id"
               class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
             >
@@ -178,12 +190,12 @@ defmodule EducationCrmWeb.Admin.ImportLive.New do
               <% end %>
             </select>
           </div>
-          
+
     <!-- CSV Upload -->
           <div class="bg-white rounded-2xl shadow-lg p-6 border border-purple-100">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">2. Upload CSV File</h2>
 
-            <form phx-change="validate" phx-submit="import">
+            <div>
               <div
                 class="border-2 border-dashed border-purple-300 rounded-xl p-8 text-center hover:border-purple-500 transition-colors"
                 phx-drop-target={@uploads.csv.ref}
@@ -198,7 +210,7 @@ defmodule EducationCrmWeb.Admin.ImportLive.New do
                 </label>
                 <p class="text-xs text-gray-400 mt-3">CSV format: name, phone (max 10MB)</p>
               </div>
-              
+
     <!-- Uploaded Files -->
               <%= for entry <- @uploads.csv.entries do %>
                 <div class="mt-4 p-4 bg-purple-50 rounded-lg flex items-center justify-between">
@@ -220,7 +232,7 @@ defmodule EducationCrmWeb.Admin.ImportLive.New do
                     <.icon name="hero-x-mark" class="w-5 h-5" />
                   </button>
                 </div>
-                
+
     <!-- Upload Progress -->
                 <div class="mt-2">
                   <div class="w-full bg-gray-200 rounded-full h-2">
@@ -231,16 +243,16 @@ defmodule EducationCrmWeb.Admin.ImportLive.New do
                     </div>
                   </div>
                 </div>
-                
+
     <!-- Upload Errors -->
                 <%= for err <- upload_errors(@uploads.csv, entry) do %>
                   <p class="mt-2 text-sm text-red-600">{error_to_string(err)}</p>
                 <% end %>
               <% end %>
-            </form>
+            </div>
           </div>
         </div>
-        
+
     <!-- Right Column: Telecaller Selection -->
         <div class="bg-white rounded-2xl shadow-lg p-6 border border-purple-100">
           <div class="flex items-center justify-between mb-4">
@@ -308,11 +320,11 @@ defmodule EducationCrmWeb.Admin.ImportLive.New do
           <% end %>
         </div>
       </div>
-      
+
     <!-- Import Button -->
       <div class="flex justify-end">
         <button
-          phx-click="import"
+          type="submit"
           disabled={
             @importing || @selected_branch_id == nil || @selected_telecaller_ids == [] ||
               @uploads.csv.entries == []
@@ -326,7 +338,8 @@ defmodule EducationCrmWeb.Admin.ImportLive.New do
           <% end %>
         </button>
       </div>
-      
+      </form>
+
     <!-- Import Results -->
       <%= if @import_result do %>
         <div class="bg-white rounded-2xl shadow-lg p-6 border border-green-200">
@@ -339,7 +352,7 @@ defmodule EducationCrmWeb.Admin.ImportLive.New do
               <p class="text-gray-600">Your leads have been imported and distributed</p>
             </div>
           </div>
-          
+
     <!-- Summary Stats -->
           <div class="grid grid-cols-3 gap-4 mb-6">
             <div class="text-center p-4 bg-gray-50 rounded-lg">
@@ -355,7 +368,7 @@ defmodule EducationCrmWeb.Admin.ImportLive.New do
               <p class="text-sm text-red-600">Failed</p>
             </div>
           </div>
-          
+
     <!-- Distribution Table -->
           <div class="mb-6">
             <h3 class="font-semibold text-gray-900 mb-3">Distribution per Telecaller</h3>
@@ -371,7 +384,7 @@ defmodule EducationCrmWeb.Admin.ImportLive.New do
               <% end %>
             </div>
           </div>
-          
+
     <!-- Errors -->
           <%= if @import_result.errors != [] do %>
             <div>

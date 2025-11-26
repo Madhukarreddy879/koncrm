@@ -77,7 +77,6 @@ defmodule EducationCrmWeb.Router do
 
     # User profile endpoints (requires authentication)
     get "/me", UserController, :me
-    get "/me", UserController, :me
     get "/me/stats", UserController, :stats
 
     # Local upload endpoint (dev/test only)

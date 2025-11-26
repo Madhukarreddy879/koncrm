@@ -4,7 +4,7 @@ import Config from 'react-native-config';
 
 // TEMPORARY FIX: Hardcode the IP address since react-native-config isn't loading .env
 // TODO: Fix react-native-config configuration
-const API_BASE_URL = Config.API_BASE_URL || 'http://10.138.166.68:4000/api';
+const API_BASE_URL = Config.API_BASE_URL || 'https://snvs.dpdns.org/api';
 
 // Log the API base URL for debugging
 console.log('[ApiService] API_BASE_URL:', API_BASE_URL);
@@ -32,7 +32,7 @@ const processQueue = (error: AxiosError | null, token: string | null = null) => 
       prom.resolve(token);
     }
   });
-  
+
   failedQueue = [];
 };
 
@@ -79,7 +79,7 @@ const apiClient: AxiosInstance = axios.create({
 apiClient.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
     const token = await AsyncStorage.getItem(TOKEN_KEY);
-    
+
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -101,7 +101,7 @@ apiClient.interceptors.request.use(
     const source = axios.CancelToken.source();
     config.cancelToken = source.token;
     pendingRequests.set(requestKey, source);
-    
+
     // Log request for debugging
     if (__DEV__) {
       console.log(`[API Request] ${config.method?.toUpperCase()} ${config.url}`, {
@@ -109,7 +109,7 @@ apiClient.interceptors.request.use(
         data: config.data,
       });
     }
-    
+
     return config;
   },
   (error) => {
@@ -135,7 +135,7 @@ apiClient.interceptors.response.use(
         data: response.data,
       });
     }
-    
+
     return response;
   },
   async (error: AxiosError | any) => {
@@ -160,7 +160,7 @@ apiClient.interceptors.response.use(
       pendingRequests.delete(requestKey);
       ongoingRequests.delete(requestKey);
     }
-    
+
     // Log error for debugging
     if (__DEV__) {
       console.error('[API Response Error]', {
@@ -169,12 +169,12 @@ apiClient.interceptors.response.use(
         data: error.response?.data,
       });
     }
-    
+
     // Handle 401 Unauthorized - Token expired
     // Skip token refresh for auth endpoints (login, refresh)
-    const isAuthEndpoint = originalRequest?.url?.includes('/auth/login') || 
-                          originalRequest?.url?.includes('/auth/refresh');
-    
+    const isAuthEndpoint = originalRequest?.url?.includes('/auth/login') ||
+      originalRequest?.url?.includes('/auth/refresh');
+
     if (error.response?.status === 401 && originalRequest && !originalRequest._retry && !isAuthEndpoint) {
       if (isRefreshing) {
         // Queue the request while token is being refreshed
@@ -189,48 +189,48 @@ apiClient.interceptors.response.use(
           })
           .catch(err => Promise.reject(err));
       }
-      
+
       originalRequest._retry = true;
       isRefreshing = true;
-      
+
       try {
         const refreshToken = await AsyncStorage.getItem(REFRESH_TOKEN_KEY);
-        
+
         if (!refreshToken) {
           throw new Error('No refresh token available');
         }
-        
+
         // Call refresh token endpoint
         const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
           refresh_token: refreshToken,
         });
-        
+
         const { access_token: newToken, refresh_token: newRefreshToken } = response.data.data;
-        
+
         // Store new tokens
         await AsyncStorage.setItem(TOKEN_KEY, newToken);
         await AsyncStorage.setItem(REFRESH_TOKEN_KEY, newRefreshToken);
-        
+
         // Update authorization header
         if (originalRequest.headers) {
           originalRequest.headers.Authorization = `Bearer ${newToken}`;
         }
-        
+
         processQueue(null, newToken);
-        
+
         return apiClient(originalRequest);
       } catch (refreshError) {
         processQueue(refreshError as AxiosError, null);
-        
+
         // Clear tokens and force logout
         await AsyncStorage.multiRemove([TOKEN_KEY, REFRESH_TOKEN_KEY]);
-        
+
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;
       }
     }
-    
+
     return Promise.reject(error);
   }
 );
