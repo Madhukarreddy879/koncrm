@@ -64,19 +64,17 @@ class CallRecordingManager {
       // Step 6: Start recording AFTER call is initiated (with delay)
       // This gives time for the call to connect and avoids recording pre-call time
       if (autoRecord && permissionsGranted.recording) {
-        // Wait 2 seconds for call to connect before starting recording
+        // Wait 3 seconds for call to connect before starting recording
+        // This delay allows the dialer to open and call to start connecting
         setTimeout(async () => {
           try {
-            // Only start if we're still in a call (app went to background)
-            if (this.appWentToBackground) {
-              await this.startRecording();
-              console.log('[CallRecording] Recording started after call connection');
-            }
+            await this.startRecording();
+            console.log('[CallRecording] Recording started after call connection delay');
           } catch (error) {
             console.error('[CallRecording] Failed to start delayed recording:', error);
             // Don't show error to user as call is already in progress
           }
-        }, 2000);
+        }, 3000);
       } else if (autoRecord && !permissionsGranted.recording) {
         // Show notice about recording permission
         ErrorMessageService.showRecordingPermissionDenied();
