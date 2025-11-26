@@ -19,11 +19,19 @@ class AudioRecorderModule(reactContext: ReactApplicationContext) : ReactContextB
     @ReactMethod
     fun startRecording(filePath: String, sampleRate: Int, bitRate: Int, promise: Promise) {
         try {
+            android.util.Log.d("AudioRecorder", "startRecording called with filePath: $filePath, sampleRate: $sampleRate, bitRate: $bitRate")
+            
             // Stop any existing recording
             stopRecordingInternal()
             
             recordingFilePath = filePath
             recordingStartTime = System.currentTimeMillis()
+            
+            // Create parent directory if it doesn't exist
+            val file = File(filePath)
+            file.parentFile?.mkdirs()
+            
+            android.util.Log.d("AudioRecorder", "Creating MediaRecorder instance")
             
             // Create MediaRecorder instance
             mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -34,6 +42,8 @@ class AudioRecorderModule(reactContext: ReactApplicationContext) : ReactContextB
             }
             
             mediaRecorder?.apply {
+                android.util.Log.d("AudioRecorder", "Configuring MediaRecorder")
+                
                 // Set audio source (MIC for microphone)
                 setAudioSource(MediaRecorder.AudioSource.MIC)
                 
@@ -52,17 +62,27 @@ class AudioRecorderModule(reactContext: ReactApplicationContext) : ReactContextB
                 // Set output file
                 setOutputFile(filePath)
                 
+                android.util.Log.d("AudioRecorder", "Preparing MediaRecorder")
                 // Prepare and start recording
                 prepare()
+                
+                android.util.Log.d("AudioRecorder", "Starting MediaRecorder")
                 start()
                 
+                android.util.Log.d("AudioRecorder", "Recording started successfully")
                 promise.resolve(filePath)
             }
         } catch (e: IOException) {
-            promise.reject("RECORDING_ERROR", "Failed to start recording: ${e.message}", e)
+            android.util.Log.e("AudioRecorder", "IOException: ${e.message}", e)
+            promise.reject("RECORDING_ERROR", "Failed to start recording (IOException): ${e.message}", e)
         } catch (e: IllegalStateException) {
-            promise.reject("RECORDING_ERROR", "Failed to start recording: ${e.message}", e)
+            android.util.Log.e("AudioRecorder", "IllegalStateException: ${e.message}", e)
+            promise.reject("RECORDING_ERROR", "Failed to start recording (IllegalStateException): ${e.message}", e)
+        } catch (e: SecurityException) {
+            android.util.Log.e("AudioRecorder", "SecurityException: ${e.message}", e)
+            promise.reject("RECORDING_ERROR", "Failed to start recording (Permission denied): ${e.message}", e)
         } catch (e: Exception) {
+            android.util.Log.e("AudioRecorder", "Exception: ${e.message}", e)
             promise.reject("RECORDING_ERROR", "Failed to start recording: ${e.message}", e)
         }
     }

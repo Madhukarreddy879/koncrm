@@ -50,12 +50,18 @@ class RecordingService {
     }
 
     try {
+      // Check if native module is available
+      if (!AudioRecorderModule) {
+        throw new Error('AudioRecorderModule is not available. Make sure the app is rebuilt after adding the native module.');
+      }
+
       // Generate file path for this recording
       this.currentRecordingPath = this.generateRecordingPath();
 
       // Get recording quality settings
       const qualityConfig = SettingsService.getRecordingQualityConfig();
       console.log('Recording with quality config:', qualityConfig);
+      console.log('Recording file path:', this.currentRecordingPath);
 
       // Start recording using native module
       await AudioRecorderModule.startRecording(
@@ -68,12 +74,13 @@ class RecordingService {
       this.isRecording = true;
       this.recordingStartTime = Date.now();
 
-      console.log('Recording started:', this.currentRecordingPath);
+      console.log('Recording started successfully:', this.currentRecordingPath);
 
       return this.currentRecordingPath;
     } catch (error) {
       this.isRecording = false;
       this.currentRecordingPath = null;
+      console.error('Failed to start recording:', error);
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Failed to start recording: ${errorMessage}`);
