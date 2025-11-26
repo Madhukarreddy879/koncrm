@@ -6,10 +6,20 @@ defmodule EducationCrmWeb.Api.UploadController do
   use EducationCrmWeb, :controller
 
   @doc """
-  PUT /api/uploads/:key
-  Handles file uploads to simulate S3 presigned URL behavior in development.
+  PUT /api/uploads/*key
+  Handles file uploads to simulate S3 presigned URL behavior.
   """
-  def upload(conn, %{"key" => key}) do
+  def upload(conn, %{"key" => key_parts}) when is_list(key_parts) do
+    # Join the key parts to get the full path
+    key = Path.join(key_parts)
+    do_upload(conn, key)
+  end
+
+  def upload(conn, %{"key" => key}) when is_binary(key) do
+    do_upload(conn, key)
+  end
+
+  defp do_upload(conn, key) do
     # Read the request body
     {:ok, body, conn} = Plug.Conn.read_body(conn)
 

@@ -20,11 +20,9 @@ defmodule EducationCrmWeb.Router do
     get "/", PageController, :home
   end
 
-  # Serve uploaded files in development
-  if Application.compile_env(:education_crm, :environment) != :prod do
-    scope "/uploads" do
-      get "/*path", EducationCrmWeb.Api.UploadController, :serve
-    end
+  # Serve uploaded files
+  scope "/uploads" do
+    get "/*path", EducationCrmWeb.Api.UploadController, :serve
   end
 
   # Admin routes
@@ -86,10 +84,8 @@ defmodule EducationCrmWeb.Router do
     get "/me", UserController, :me
     get "/me/stats", UserController, :stats
 
-    # Local upload endpoint (dev/test only)
-    if Application.compile_env(:education_crm, :environment) != :prod do
-      put "/uploads/:key", UploadController, :upload
-    end
+    # Upload endpoint for presigned URL simulation
+    put "/uploads/*key", UploadController, :upload
   end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development
