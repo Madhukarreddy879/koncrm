@@ -208,15 +208,14 @@ export default function LeadDetailScreen() {
       // Use CallRecordingManager to handle call with recording
       await CallRecordingManager.handleCallWithRecording(leadId, lead.phone_number, true);
 
-      // Check if recording started
-      if (CallRecordingManager.isRecording()) {
-        setIsRecording(true);
-        startRecordingTimer();
-        showToast('Recording started successfully');
-      } else {
-        // Show manual recording modal
-        setShowRecordingModal(true);
-      }
+      // We don't check for isRecording immediately here because the service might take a moment to start
+      // and the CallRecordingManager has a delay logic.
+      // The UI will update automatically via the useEffect interval when recording starts.
+
+      showToast('Calling...');
+
+      // Only show manual recording modal if recording hasn't started after a significant timeout (e.g. 15s)
+      // This logic could be added if needed, but for now we rely on the service.
     } catch (error) {
       console.error('Error initiating call with recording:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
