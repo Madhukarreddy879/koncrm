@@ -15,6 +15,8 @@ class CallRecordingManager {
   private currentCallLogId: string | null = null;
   private recordingMetadata: RecordingMetadata | null = null;
   private uploadInProgress: boolean = false;
+  private callInitiatedTime: number = 0;
+  private appWentToBackground: boolean = false;
 
   /**
    * Handles call with automatic recording
@@ -286,6 +288,10 @@ class CallRecordingManager {
       this.appStateSubscription.remove();
     }
 
+    // Mark when call was initiated
+    this.callInitiatedTime = Date.now();
+    this.appWentToBackground = false;
+
     // Add new listener
     this.appStateSubscription = AppState.addEventListener(
       'change',
@@ -298,17 +304,36 @@ class CallRecordingManager {
    * @param nextAppState - Next app state
    */
   private async handleAppStateChange(nextAppState: AppStateStatus): Promise<void> {
+    const timeSinceCallInitiated = Date.now() - this.callInitiatedTime;
+    
+    // Track when app goes to background (dialer opens)
+    if (nextAppState === 'background' || nextAppState === 'inactive') {
+      console.log('App went to background/inactive - dialer opened');
+      this.appWentToBackground = true;
+      return;
+    }
+
     // When app becomes active again (user returned from call)
     if (nextAppState === 'active') {
-      console.log('App became active - user returned from call');
+      console.log('App became active - checking if call completed');
+      console.log(`Time since call initiated: ${timeSinceCallInitiated}ms`);
+      console.log(`App went to background: ${this.appWentToBackground}`);
 
-      // Stop recording if in progress
-      if (RecordingService.isCurrentlyRecording()) {
+      // Only stop recording if:
+      // 1. App actually went to background (dialer was opened)
+      // 2. At least 3 seconds have passed (to avoid stopping immediately)
+      // 3. Recording is still in progress
+      if (this.appWentToBackground && 
+          timeSinceCallInitiated > 3000 && 
+          RecordingService.isCurrentlyRecording()) {
+        console.log('Stopping recording - call appears to be complete');
         try {
           await this.stopRecording(true);
         } catch (error) {
           console.error('Failed to stop recording on app resume:', error);
         }
+      } else {
+        console.log('Not stopping recording - call just initiated or recording already stopped');
       }
 
       // Clean up
@@ -330,6 +355,8 @@ class CallRecordingManager {
     this.currentLeadId = null;
     this.currentCallLogId = null;
     this.recordingMetadata = null;
+    this.callInitiatedTime = 0;
+    this.appWentToBackground = false;
   }
 
   /**
