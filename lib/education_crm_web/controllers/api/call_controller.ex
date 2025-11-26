@@ -119,7 +119,7 @@ defmodule EducationCrmWeb.Api.CallController do
       {:ok, _lead} ->
         with {:ok, filename} <- get_required_param(params, "filename") do
           content_type = Map.get(params, "content_type", "audio/aac")
-          
+
           # Generate a unique key
           uuid = Ecto.UUID.generate()
           ext = Path.extname(filename)
@@ -127,8 +127,8 @@ defmodule EducationCrmWeb.Api.CallController do
 
           case S3Service.presigned_put_url(key, content_type) do
             {:ok, upload_url} ->
-              public_url = S3Service.format_key(key)
-              
+              public_url = S3Service.get_public_url(key)
+
               conn
               |> json(%{
                 data: %{
@@ -137,7 +137,7 @@ defmodule EducationCrmWeb.Api.CallController do
                   public_url: public_url
                 }
               })
-              
+
             {:error, reason} ->
               conn
               |> put_status(:internal_server_error)
@@ -359,10 +359,9 @@ defmodule EducationCrmWeb.Api.CallController do
 
     case verify_lead_access(lead_id, telecaller_id) do
       {:ok, _lead} ->
-        # For S3 uploads, we just attach the public URL (or key) to the call log
-        # In a real app, we might want to verify the file exists on S3 first
-        # Store the S3 key with a prefix so we know it's an S3 file
-        file_path = S3Service.format_key(s3_key)
+        # For S3 uploads, store the public URL
+        # In development, this will be a local URL; in production, an S3 URL
+        file_path = S3Service.get_public_url(s3_key)
         handle_recording_attachment(conn, call_log_id, file_path)
 
       {:error, status, error} ->
@@ -449,24 +448,12 @@ defmodule EducationCrmWeb.Api.CallController do
               }
             })
 
-          %{recording_path: "s3:" <> key} ->
-            # It's an S3 file, generate presigned URL and redirect
-            case S3Service.presigned_get_url(key) do
-              {:ok, url} ->
-                redirect(conn, external: url)
-              
-              {:error, _reason} ->
-                conn
-                |> put_status(:internal_server_error)
-                |> json(%{
-                  error: %{
-                    code: "SERVER_ERROR",
-                    message: "Failed to generate playback URL"
-                  }
-                })
-            end
+          %{recording_path: "http" <> _rest = url} ->
+            # It's already a full URL (from S3 or local uploads), redirect to it
+            redirect(conn, external: url)
 
           %{recording_path: path} ->
+            # It's a local file path
             if File.exists?(path) do
               stream_recording(conn, path)
             else

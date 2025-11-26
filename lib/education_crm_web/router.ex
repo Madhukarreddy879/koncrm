@@ -20,6 +20,13 @@ defmodule EducationCrmWeb.Router do
     get "/", PageController, :home
   end
 
+  # Serve uploaded files in development
+  if Application.compile_env(:education_crm, :environment) != :prod do
+    scope "/uploads" do
+      get "/*path", EducationCrmWeb.Api.UploadController, :serve
+    end
+  end
+
   # Admin routes
   scope "/admin", EducationCrmWeb.Admin do
     pipe_through :browser
