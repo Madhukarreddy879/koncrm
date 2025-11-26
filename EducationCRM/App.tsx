@@ -12,6 +12,7 @@ import SettingsService from './src/services/SettingsService';
 import RecordingCacheService from './src/services/RecordingCacheService';
 import UploadQueueService from './src/services/UploadQueueService';
 import OfflineStorageService from './src/services/OfflineStorageService';
+import PermissionService from './src/services/PermissionService';
 
 function App() {
   const isDarkMode = useColorScheme() === 'dark';
@@ -25,6 +26,9 @@ function App() {
     // Initialize services on app startup
     const initializeServices = async () => {
       try {
+        // Check permissions on app launch
+        await PermissionService.checkPermissionsOnLaunch();
+        
         await SettingsService.initialize();
         await RecordingCacheService.initialize();
         await UploadQueueService.initialize();

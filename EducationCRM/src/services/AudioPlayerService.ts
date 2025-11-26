@@ -3,6 +3,10 @@
  * Uses react-native-audio-api for playback with Web Audio API compatibility
  */
 
+import { AudioContext, AudioBufferSourceNode } from 'react-native-audio-api';
+import ReactNativeBlobUtil from 'react-native-blob-util';
+import ErrorMessageService from './ErrorMessageService';
+
 export interface PlaybackState {
   isPlaying: boolean;
   currentTime: number;
@@ -12,7 +16,9 @@ export interface PlaybackState {
 }
 
 class AudioPlayerService {
-  private audioPlayer: any = null; // Will hold the AudioPlayer instance
+  private audioContext: AudioContext | null = null;
+  private audioBufferSource: AudioBufferSourceNode | null = null;
+  private audioBuffer: any = null; // AudioBuffer type
   private currentUrl: string | null = null;
   private playbackState: PlaybackState = {
     isPlaying: false,
@@ -23,6 +29,19 @@ class AudioPlayerService {
   };
   private stateListeners: Array<(state: PlaybackState) => void> = [];
   private updateInterval: ReturnType<typeof setInterval> | null = null;
+  private startTime: number = 0;
+  private pausedAt: number = 0;
+  private cachedFiles: Map<string, string> = new Map(); // URL -> local file path
+
+  /**
+   * Initialize audio context
+   */
+  private initAudioContext(): void {
+    if (!this.audioContext) {
+      this.audioContext = new AudioContext();
+      console.log('[AudioPlayer] AudioContext initialized');
+    }
+  }
 
   /**
    * Load an audio file for playback
@@ -37,20 +56,28 @@ class AudioPlayerService {
       this.updateState({ isLoading: true, error: null });
       this.currentUrl = url;
 
-      // Note: In a real implementation with react-native-audio-api:
-      // const audioContext = new AudioContext();
-      // const response = await fetch(url);
-      // const arrayBuffer = await response.arrayBuffer();
-      // const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-      // this.audioPlayer = audioContext.createBufferSource();
-      // this.audioPlayer.buffer = audioBuffer;
-      // this.audioPlayer.connect(audioContext.destination);
+      // Initialize audio context
+      this.initAudioContext();
 
-      // For now, simulate loading
-      await new Promise<void>(resolve => setTimeout(resolve, 500));
+      console.log('[AudioPlayer] Loading audio from:', url);
 
-      // Simulate getting duration (in real implementation, get from audioBuffer.duration)
-      const duration = 120; // Mock duration in seconds
+      // Check if file is already cached
+      let filePath = this.cachedFiles.get(url);
+
+      if (!filePath) {
+        // Download and cache the file
+        filePath = await this.downloadAndCacheFile(url);
+      }
+
+      // Read file as array buffer
+      const base64Data = await ReactNativeBlobUtil.fs.readFile(filePath, 'base64');
+      const arrayBuffer = this.base64ToArrayBuffer(base64Data);
+
+      // Decode audio data
+      console.log('[AudioPlayer] Decoding audio data...');
+      this.audioBuffer = await this.audioContext!.decodeAudioData(arrayBuffer);
+
+      const duration = this.audioBuffer.duration;
 
       this.updateState({
         isLoading: false,
@@ -58,7 +85,7 @@ class AudioPlayerService {
         currentTime: 0,
       });
 
-      console.log('[AudioPlayer] Audio loaded:', url);
+      console.log('[AudioPlayer] Audio loaded successfully, duration:', duration);
     } catch (error) {
       console.error('[AudioPlayer] Failed to load audio:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to load audio';
@@ -66,8 +93,66 @@ class AudioPlayerService {
         isLoading: false,
         error: errorMessage,
       });
+      
+      // Show user-friendly error message
+      ErrorMessageService.handleError(error, true);
+      
       throw error;
     }
+  }
+
+  /**
+   * Download and cache audio file
+   * @param url - URL to download from
+   * @returns Local file path
+   */
+  private async downloadAndCacheFile(url: string): Promise<string> {
+    try {
+      console.log('[AudioPlayer] Downloading file from:', url);
+
+      // Get auth token from AsyncStorage
+      const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+      const token = await AsyncStorage.getItem('@education_crm_token');
+
+      const fileName = `recording_${Date.now()}.aac`;
+      const filePath = `${ReactNativeBlobUtil.fs.dirs.CacheDir}/${fileName}`;
+
+      // Download with auth header
+      await ReactNativeBlobUtil.config({
+        path: filePath,
+        fileCache: true,
+      }).fetch('GET', url, {
+        Authorization: token ? `Bearer ${token}` : '',
+      });
+
+      // Cache the file path
+      this.cachedFiles.set(url, filePath);
+
+      console.log('[AudioPlayer] File downloaded and cached:', filePath);
+      return filePath;
+    } catch (error) {
+      console.error('[AudioPlayer] Failed to download file:', error);
+      
+      // Show user-friendly error message
+      ErrorMessageService.handleError(error, true);
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Convert base64 to ArrayBuffer
+   * @param base64 - Base64 encoded string
+   * @returns ArrayBuffer
+   */
+  private base64ToArrayBuffer(base64: string): ArrayBuffer {
+    // Use react-native-blob-util's base64 decoding
+    const decoded = ReactNativeBlobUtil.base64.decode(base64);
+    const bytes = new Uint8Array(decoded.length);
+    for (let i = 0; i < decoded.length; i++) {
+      bytes[i] = decoded.charCodeAt(i);
+    }
+    return bytes.buffer;
   }
 
   /**
@@ -76,7 +161,7 @@ class AudioPlayerService {
    */
   async play(): Promise<void> {
     try {
-      if (!this.currentUrl) {
+      if (!this.audioBuffer) {
         throw new Error('No audio loaded');
       }
 
@@ -85,19 +170,36 @@ class AudioPlayerService {
         return;
       }
 
-      // In real implementation:
-      // this.audioPlayer.start(0, this.playbackState.currentTime);
+      // Create new buffer source
+      this.audioBufferSource = this.audioContext!.createBufferSource();
+      this.audioBufferSource.buffer = this.audioBuffer;
+      this.audioBufferSource.connect(this.audioContext!.destination);
+
+      // Set up ended event (using onEnded for react-native-audio-api)
+      this.audioBufferSource.onEnded = () => {
+        console.log('[AudioPlayer] Playback ended');
+        void this.stop();
+      };
+
+      // Start playback from current position
+      const offset = this.pausedAt || 0;
+      this.audioBufferSource.start(this.audioContext!.currentTime, offset);
+      this.startTime = this.audioContext!.currentTime - offset;
 
       this.updateState({ isPlaying: true });
 
       // Start update interval to track current time
       this.startUpdateInterval();
 
-      console.log('[AudioPlayer] Playback started');
+      console.log('[AudioPlayer] Playback started from:', offset);
     } catch (error) {
       console.error('[AudioPlayer] Failed to start playback:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to play audio';
       this.updateState({ error: errorMessage });
+      
+      // Show user-friendly error message
+      ErrorMessageService.handleError(error, true);
+      
       throw error;
     }
   }
@@ -111,13 +213,23 @@ class AudioPlayerService {
         return;
       }
 
-      // In real implementation:
-      // this.audioPlayer.stop();
+      // Stop the buffer source
+      if (this.audioBufferSource) {
+        this.audioBufferSource.stop();
+        this.audioBufferSource.disconnect();
+        this.audioBufferSource = null;
+      }
 
-      this.updateState({ isPlaying: false });
+      // Save current position
+      this.pausedAt = this.audioContext!.currentTime - this.startTime;
+
+      this.updateState({ 
+        isPlaying: false,
+        currentTime: this.pausedAt
+      });
       this.stopUpdateInterval();
 
-      console.log('[AudioPlayer] Playback paused');
+      console.log('[AudioPlayer] Playback paused at:', this.pausedAt);
     } catch (error) {
       console.error('[AudioPlayer] Failed to pause playback:', error);
     }
@@ -128,14 +240,20 @@ class AudioPlayerService {
    */
   async stop(): Promise<void> {
     try {
-      if (this.audioPlayer) {
-        // In real implementation:
-        // this.audioPlayer.stop();
-        // this.audioPlayer.disconnect();
-        this.audioPlayer = null;
+      if (this.audioBufferSource) {
+        try {
+          this.audioBufferSource.stop();
+          this.audioBufferSource.disconnect();
+        } catch (e) {
+          // Ignore errors if already stopped
+        }
+        this.audioBufferSource = null;
       }
 
       this.stopUpdateInterval();
+      this.pausedAt = 0;
+      this.startTime = 0;
+
       this.updateState({
         isPlaying: false,
         currentTime: 0,
@@ -156,17 +274,22 @@ class AudioPlayerService {
       const wasPlaying = this.playbackState.isPlaying;
 
       // Stop current playback
-      await this.stop();
+      if (this.audioBufferSource) {
+        this.audioBufferSource.stop();
+        this.audioBufferSource.disconnect();
+        this.audioBufferSource = null;
+      }
 
-      // Update current time
-      this.updateState({ currentTime: time });
+      // Update paused position
+      this.pausedAt = Math.max(0, Math.min(time, this.playbackState.duration));
+      this.updateState({ currentTime: this.pausedAt });
 
       // Resume if was playing
       if (wasPlaying) {
         await this.play();
       }
 
-      console.log('[AudioPlayer] Seeked to:', time);
+      console.log('[AudioPlayer] Seeked to:', this.pausedAt);
     } catch (error) {
       console.error('[AudioPlayer] Failed to seek:', error);
     }
@@ -220,14 +343,14 @@ class AudioPlayerService {
     this.stopUpdateInterval();
 
     this.updateInterval = setInterval(() => {
-      if (this.playbackState.isPlaying) {
-        const newTime = this.playbackState.currentTime + 0.1;
+      if (this.playbackState.isPlaying && this.audioContext) {
+        const currentTime = this.audioContext.currentTime - this.startTime;
 
         // Check if reached end
-        if (newTime >= this.playbackState.duration) {
+        if (currentTime >= this.playbackState.duration) {
           void this.stop();
         } else {
-          this.updateState({ currentTime: newTime });
+          this.updateState({ currentTime });
         }
       }
     }, 100) as ReturnType<typeof setInterval>; // Update every 100ms
@@ -244,12 +367,37 @@ class AudioPlayerService {
   }
 
   /**
+   * Clear cached files
+   */
+  async clearCache(): Promise<void> {
+    try {
+      for (const filePath of this.cachedFiles.values()) {
+        await ReactNativeBlobUtil.fs.unlink(filePath).catch(() => {
+          // Ignore errors if file doesn't exist
+        });
+      }
+      this.cachedFiles.clear();
+      console.log('[AudioPlayer] Cache cleared');
+    } catch (error) {
+      console.error('[AudioPlayer] Failed to clear cache:', error);
+    }
+  }
+
+  /**
    * Cleanup resources
    */
   async cleanup(): Promise<void> {
     await this.stop();
     this.stateListeners = [];
     this.currentUrl = null;
+    this.audioBuffer = null;
+
+    if (this.audioContext) {
+      await this.audioContext.close();
+      this.audioContext = null;
+    }
+
+    console.log('[AudioPlayer] Cleanup complete');
   }
 }
 

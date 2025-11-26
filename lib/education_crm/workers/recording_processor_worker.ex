@@ -60,9 +60,6 @@ defmodule EducationCrm.Workers.RecordingProcessorWorker do
 
       {:error, :upload_not_found} ->
         {:cancel, :upload_not_found}
-
-      {:error, reason} ->
-        {:error, reason}
     end
   end
 

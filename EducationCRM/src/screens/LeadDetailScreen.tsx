@@ -18,6 +18,7 @@ import FollowUpService from '../services/FollowUpService';
 import CallRecordingManager from '../managers/CallRecordingManager';
 import AudioPlayerService, { PlaybackState } from '../services/AudioPlayerService';
 import UploadQueueService from '../services/UploadQueueService';
+import RecordingList from '../components/RecordingList';
 
 const STATUS_OPTIONS = [
   { label: 'New', value: 'new' },
@@ -652,72 +653,20 @@ export default function LeadDetailScreen() {
       {/* Call Recordings Section */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Call Recordings</Text>
-        {isUploading && (
-          <View style={styles.uploadProgressContainer}>
-            <Text style={styles.uploadProgressText}>
-              Uploading: {uploadProgress.toFixed(0)}%
-            </Text>
-            <View style={styles.progressBar}>
-              <View
-                style={[styles.progressBarFill, { width: `${uploadProgress}%` }]}
-              />
-            </View>
-          </View>
-        )}
-        {lead.call_logs.filter(c => c.recording_path).length === 0 ? (
-          <Text style={styles.emptyText}>No recordings available</Text>
-        ) : (
-          lead.call_logs
-            .filter(c => c.recording_path)
-            .map(call => {
-              const isPlaying = currentPlayingId === call.id && playbackState?.isPlaying;
-              const isCurrentRecording = currentPlayingId === call.id;
-              const isLoadingRecording = isCurrentRecording && playbackState?.isLoading;
-
-              return (
-                <View key={call.id} style={styles.recordingItemContainer}>
-                  <View style={styles.recordingItem}>
-                    <View style={styles.recordingInfo}>
-                      <Text style={styles.recordingDate}>
-                        {new Date(call.inserted_at).toLocaleString()}
-                      </Text>
-                      {call.duration_seconds && (
-                        <Text style={styles.recordingDuration}>
-                          Duration: {Math.floor(call.duration_seconds / 60)}:{String(call.duration_seconds % 60).padStart(2, '0')}
-                        </Text>
-                      )}
-                      {isCurrentRecording && playbackState && !playbackState.isLoading && (
-                        <Text style={styles.playbackTime}>
-                          {formatRecordingTime(Math.floor(playbackState.currentTime))} / {formatRecordingTime(Math.floor(playbackState.duration))}
-                        </Text>
-                      )}
-                    </View>
-                    <View style={styles.recordingActions}>
-                      <TouchableOpacity
-                        style={styles.playButton}
-                        onPress={() => handlePlayRecording(call.id)}
-                        disabled={isLoadingRecording}
-                      >
-                        {isLoadingRecording ? (
-                          <ActivityIndicator size="small" color="#3b82f6" />
-                        ) : (
-                          <Text style={styles.playIcon}>
-                            {isPlaying ? '⏸️' : '▶️'}
-                          </Text>
-                        )}
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.deleteButton}
-                        onPress={() => handleDeleteRecording(call.id)}
-                      >
-                        <Text style={styles.deleteIcon}>🗑️</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                </View>
-              );
-            })
-        )}
+        <RecordingList
+          callLogs={lead.call_logs}
+          onPlayRecording={handlePlayRecording}
+          currentPlayingId={currentPlayingId}
+          isPlaying={playbackState?.isPlaying || false}
+          isLoading={playbackState?.isLoading || false}
+          uploadProgress={uploadProgress}
+          isUploading={isUploading}
+          playbackTime={
+            currentPlayingId && playbackState && !playbackState.isLoading
+              ? `${formatRecordingTime(Math.floor(playbackState.currentTime))} / ${formatRecordingTime(Math.floor(playbackState.duration))}`
+              : undefined
+          }
+        />
 
         {/* Playback Controls */}
         {currentPlayingId && playbackState && !playbackState.isLoading && (
@@ -1103,47 +1052,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  recordingItemContainer: {
-    marginBottom: 8,
-  },
-  recordingItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#f9fafb',
-    padding: 12,
-    borderRadius: 8,
-  },
-  recordingActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  recordingInfo: {
-    flex: 1,
-  },
-  recordingDate: {
-    fontSize: 14,
-    color: '#111827',
-    fontWeight: '500',
-    marginBottom: 2,
-  },
-  recordingDuration: {
-    fontSize: 13,
-    color: '#6b7280',
-  },
-  playButton: {
-    padding: 8,
-  },
-  playIcon: {
-    fontSize: 24,
-  },
-  deleteButton: {
-    padding: 8,
-  },
-  deleteIcon: {
-    fontSize: 20,
-  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -1273,35 +1181,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 20,
     fontStyle: 'italic',
-  },
-  uploadProgressContainer: {
-    backgroundColor: '#f0f9ff',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 12,
-  },
-  uploadProgressText: {
-    fontSize: 13,
-    color: '#0369a1',
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  progressBar: {
-    height: 6,
-    backgroundColor: '#e0f2fe',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: '100%',
-    backgroundColor: '#0284c7',
-    borderRadius: 3,
-  },
-  playbackTime: {
-    fontSize: 12,
-    color: '#3b82f6',
-    marginTop: 4,
-    fontWeight: '500',
   },
   playbackControls: {
     marginTop: 12,

@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ActivityIndicator, View, StyleSheet } from 'react-native';
+import { ActivityIndicator, View, StyleSheet, AppState } from 'react-native';
 import { authEvents } from '../utils/authEvents';
+import { TOKEN_KEY } from '../services/ApiService';
 
 // Placeholder screens - will be implemented in later tasks
 import LoginScreen from '../screens/LoginScreen';
@@ -98,39 +99,42 @@ export default function AppNavigator() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    checkAuthStatus();
-
-    // Subscribe to auth events to handle login/logout dynamically
-    const unsubscribe = authEvents.subscribe(() => {
-      console.log('[AppNavigator] Auth event received, re-checking status');
-      checkAuthStatus();
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, []);
-
-  const checkAuthStatus = async () => {
+  const checkAuthStatus = useCallback(async () => {
     try {
       // Use the same token key as ApiService
-      const token = await AsyncStorage.getItem('@education_crm_token');
+      const token = await AsyncStorage.getItem(TOKEN_KEY);
       console.log('[AppNavigator] Checking auth status, token exists:', !!token);
+      console.log('[AppNavigator] Token key used:', TOKEN_KEY);
       setIsAuthenticated(!!token);
-
-      if (token) {
-        // Request permissions immediately after login
-        const PermissionService = (await import('../services/PermissionService')).default;
-        await PermissionService.requestAllPermissions();
-      }
     } catch (error) {
       console.error('[AppNavigator] Error checking auth status:', error);
       setIsAuthenticated(false);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    checkAuthStatus();
+
+    // Subscribe to auth events (login/logout)
+    const unsubscribe = authEvents.subscribe(() => {
+      console.log('[AppNavigator] Auth event received, rechecking auth status');
+      checkAuthStatus();
+    });
+
+    // Listen to app state changes to recheck auth when app comes to foreground
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        checkAuthStatus();
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      subscription.remove();
+    };
+  }, [checkAuthStatus]);
 
   if (isLoading) {
     return (

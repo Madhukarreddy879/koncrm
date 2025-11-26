@@ -3,7 +3,8 @@ import CallHelper from '../utils/CallHelper';
 import RecordingService, { RecordingMetadata } from '../services/RecordingService';
 import PermissionService from '../services/PermissionService';
 import LeadService from '../services/LeadService';
-import UploadQueueService from '../services/UploadQueueService';
+import RecordingUploadService from '../services/RecordingUploadService';
+import ErrorMessageService from '../services/ErrorMessageService';
 
 /**
  * CallRecordingManager - Coordinates call initiation and recording
@@ -15,8 +16,17 @@ class CallRecordingManager {
   private currentCallLogId: string | null = null;
   private recordingMetadata: RecordingMetadata | null = null;
   private uploadInProgress: boolean = false;
+  private uploadStatus: 'idle' | 'uploading' | 'success' | 'failed' = 'idle';
+  private uploadProgress: number = 0;
   private callInitiatedTime: number = 0;
   private appWentToBackground: boolean = false;
+
+  constructor() {
+    // Initialize upload service
+    RecordingUploadService.initialize().catch(error => {
+      console.error('[CallRecordingManager] Failed to initialize upload service:', error);
+    });
+  }
 
   /**
    * Handles call with automatic recording
@@ -35,11 +45,7 @@ class CallRecordingManager {
       const permissionsGranted = await this.checkAndRequestPermissions();
 
       if (!permissionsGranted.call) {
-        Alert.alert(
-          'Permission Required',
-          'Phone call permission is required to make calls. Please enable it in settings.',
-          [{ text: 'OK' }],
-        );
+        ErrorMessageService.showCallPermissionDenied();
         return;
       }
 
@@ -53,19 +59,13 @@ class CallRecordingManager {
         } catch (error) {
           console.error('Failed to start recording:', error);
           // Continue with call even if recording fails
-          Alert.alert(
-            'Recording Failed',
-            'Unable to start recording, but call will proceed. You can manually start recording after the call begins.',
-            [{ text: 'OK' }],
+          ErrorMessageService.handleError(error, false, 
+            'Unable to start recording, but call will proceed. You can manually start recording after the call begins.'
           );
         }
       } else if (autoRecord && !permissionsGranted.recording) {
         // Show notice about recording permission
-        Alert.alert(
-          'Recording Permission Denied',
-          'Call recording requires microphone permission. The call will proceed without recording.',
-          [{ text: 'OK' }],
-        );
+        ErrorMessageService.showRecordingPermissionDenied();
       }
 
       // Step 4: Initiate the call
@@ -80,11 +80,7 @@ class CallRecordingManager {
       // Clean up on error
       await this.cleanup();
 
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error';
-      Alert.alert('Call Failed', `Unable to initiate call: ${errorMessage}`, [
-        { text: 'OK' },
-      ]);
+      ErrorMessageService.handleError(error, false, 'Unable to initiate call. Please try again.');
 
       throw error;
     }
@@ -100,7 +96,7 @@ class CallRecordingManager {
       const hasPermission = await PermissionService.hasRecordingPermission();
 
       if (!hasPermission) {
-        const result = await PermissionService.requestRecordingPermission();
+        const result = await PermissionService.requestPermissionWithHandling('recording');
         if (result.status !== 'granted') {
           throw new Error('Recording permission denied');
         }
@@ -175,9 +171,10 @@ class CallRecordingManager {
   }
 
   /**
-   * Upload a recording to the server with retry queue support
+   * Upload a recording to the server using RecordingUploadService
    * @param leadId - Lead ID
    * @param metadata - Recording metadata
+   * @param onProgress - Progress callback
    * @returns Promise that resolves when upload is complete
    */
   private async uploadRecording(
@@ -186,50 +183,70 @@ class CallRecordingManager {
     onProgress?: (progress: number) => void,
   ): Promise<void> {
     if (this.uploadInProgress) {
-      console.log('Upload already in progress');
+      console.log('[CallRecordingManager] Upload already in progress');
+      return;
+    }
+
+    if (!this.currentCallLogId) {
+      console.error('[CallRecordingManager] No call log ID available for upload');
       return;
     }
 
     try {
       this.uploadInProgress = true;
+      this.uploadStatus = 'uploading';
+      this.uploadProgress = 0;
 
-      console.log('Uploading recording:', metadata.filePath);
+      console.log('[CallRecordingManager] Uploading recording:', metadata.filePath);
 
-      if (!this.currentCallLogId) {
-        console.error('No call log ID available for upload');
-        return;
-      }
-
-      await LeadService.uploadRecording(
+      const result = await RecordingUploadService.uploadRecording({
+        filePath: metadata.filePath,
         leadId,
-        this.currentCallLogId,
-        metadata.filePath,
-        onProgress || ((progress) => {
-          console.log(`Upload progress: ${progress.toFixed(2)}%`);
-        }),
-      );
+        callLogId: this.currentCallLogId,
+        onProgress: (progress) => {
+          this.uploadProgress = progress;
+          if (onProgress) {
+            onProgress(progress);
+          }
+          console.log(`[CallRecordingManager] Upload progress: ${progress.toFixed(2)}%`);
+        },
+      });
 
-      console.log('Recording uploaded successfully');
+      if (result.success) {
+        console.log('[CallRecordingManager] Recording uploaded successfully');
+        this.uploadStatus = 'success';
+        this.uploadProgress = 100;
 
-      // Clean up local file after successful upload
-      await RecordingService.deleteRecording(metadata.filePath);
+        // Clean up local file after successful upload
+        await RecordingService.deleteRecording(metadata.filePath);
+      } else {
+        throw new Error(result.error || 'Upload failed');
+      }
     } catch (error) {
-      console.error('Failed to upload recording:', error);
-
-      // Add to upload queue for retry when network is available
-      await UploadQueueService.addToQueue(leadId, metadata.filePath);
+      console.error('[CallRecordingManager] Failed to upload recording:', error);
+      this.uploadStatus = 'failed';
 
       // Show error to user
-      Alert.alert(
-        'Upload Failed',
-        'Failed to upload recording. It will be retried automatically when network is available.',
-        [{ text: 'OK' }],
-      );
+      ErrorMessageService.showUploadFailed();
 
       throw error;
     } finally {
       this.uploadInProgress = false;
     }
+  }
+
+  /**
+   * Get current upload status
+   * @returns Upload status object
+   */
+  getUploadStatus(): {
+    status: 'idle' | 'uploading' | 'success' | 'failed';
+    progress: number;
+  } {
+    return {
+      status: this.uploadStatus,
+      progress: this.uploadProgress,
+    };
   }
 
   /**
@@ -249,12 +266,15 @@ class CallRecordingManager {
         return { call: true, recording: true };
       }
 
-      // Request missing permissions
-      const results = await PermissionService.requestAllPermissions();
+      // Request call permission with proper handling
+      const callResult = await PermissionService.requestPermissionWithHandling('call');
+      
+      // Request recording permission with proper handling
+      const recordingResult = await PermissionService.requestPermissionWithHandling('recording');
 
       return {
-        call: results.call.status === 'granted',
-        recording: results.recording.status === 'granted',
+        call: callResult.status === 'granted',
+        recording: recordingResult.status === 'granted',
       };
     } catch (error) {
       console.error('Failed to check/request permissions:', error);
@@ -363,6 +383,15 @@ class CallRecordingManager {
     this.recordingMetadata = null;
     this.callInitiatedTime = 0;
     this.appWentToBackground = false;
+    this.uploadStatus = 'idle';
+    this.uploadProgress = 0;
+  }
+
+  /**
+   * Cleanup on app shutdown
+   */
+  destroy(): void {
+    RecordingUploadService.cleanup();
   }
 
   /**
@@ -371,14 +400,8 @@ class CallRecordingManager {
    */
   private handleRecordingFailure(error: any): void {
     console.error('Recording failure:', error);
-
-    const errorMessage =
-      error instanceof Error ? error.message : 'Unknown error';
-
-    Alert.alert(
-      'Recording Error',
-      `Recording failed: ${errorMessage}. The call will continue without recording.`,
-      [{ text: 'OK' }],
+    ErrorMessageService.handleError(error, false, 
+      'Recording failed. The call will continue without recording.'
     );
   }
 }

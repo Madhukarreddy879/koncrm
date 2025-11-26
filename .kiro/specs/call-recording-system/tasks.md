@@ -12,8 +12,8 @@
 
 ## Mobile App Tasks (TO BE IMPLEMENTED)
 
-- [ ] 2. Implement mobile app upload service
-  - [ ] 2.1 Create RecordingUploadService in TypeScript
+- [x] 2. Implement mobile app upload service
+  - [x] 2.1 Create RecordingUploadService in TypeScript
     - Create `EducationCRM/src/services/RecordingUploadService.ts`
     - Implement S3 presigned URL upload flow:
       1. Request presigned URL from `/api/leads/:lead_id/recordings/presign`
@@ -25,7 +25,7 @@
     - Implement error handling for network errors and non-200 responses
     - _Requirements: 4.1, 4.5, 6.4_
   
-  - [ ] 2.2 Add upload retry logic with exponential backoff
+  - [x] 2.2 Add upload retry logic with exponential backoff
     - Implement retry queue state management
     - Add `retryUpload` function with exponential backoff (3 attempts)
     - Store failed uploads in AsyncStorage for persistence
@@ -33,7 +33,7 @@
     - Handle both S3 and chunked upload retries
     - _Requirements: 4.6_
   
-  - [ ] 2.3 Integrate upload service with CallRecordingManager
+  - [x] 2.3 Integrate upload service with CallRecordingManager
     - Import RecordingUploadService in CallRecordingManager
     - Create call_log first via `/api/leads/:lead_id/calls` endpoint
     - Call upload service after recording stops successfully
@@ -42,8 +42,8 @@
     - Update UI to show upload status (uploading, success, failed)
     - _Requirements: 4.1, 4.5_
 
-- [ ] 3. Create recording list UI component
-  - [ ] 3.1 Create RecordingList component
+- [x] 3. Create recording list UI component
+  - [x] 3.1 Create RecordingList component
     - Create `EducationCRM/src/components/RecordingList.tsx`
     - Display list of call_logs with recordings (filter where recording_path is not null)
     - Show date, time, duration, and call outcome for each recording
@@ -53,7 +53,7 @@
     - Use creative typography and color schemes
     - _Requirements: 5.2, 5.3, 5.4_
   
-  - [ ] 3.2 Integrate RecordingList into LeadDetailScreen
+  - [x] 3.2 Integrate RecordingList into LeadDetailScreen
     - Import RecordingList component
     - Extract call_logs with recordings from lead data (already fetched)
     - Pass recordings data to component
@@ -61,8 +61,8 @@
     - Show empty state when no recordings exist
     - _Requirements: 5.1, 5.2, 5.3_
 
-- [ ] 4. Implement audio playback functionality
-  - [ ] 4.1 Add audio player to mobile app
+- [x] 4. Implement audio playback functionality
+  - [x] 4.1 Add audio player to mobile app
     - Install react-native-sound or react-native-track-player library
     - Create audio player hook or service
     - Implement play, pause, seek controls
@@ -70,7 +70,7 @@
     - Handle audio session management (pause on interruption)
     - _Requirements: 5.3_
   
-  - [ ] 4.2 Stream audio from backend
+  - [x] 4.2 Stream audio from backend
     - Fetch recording file from `/api/leads/:lead_id/recordings/:recording_id` endpoint
     - Handle S3 redirects (backend returns presigned URL for S3 files)
     - Handle local file streaming with range requests
@@ -78,15 +78,15 @@
     - Show loading state while fetching audio
     - _Requirements: 5.3, 5.5_
 
-- [ ] 5. Add permission handling and error messages
-  - [ ] 5.1 Check and request audio recording permissions
+- [x] 5. Add permission handling and error messages
+  - [x] 5.1 Check and request audio recording permissions
     - Check permission status on app launch
     - Request permission before starting recording
     - Show explanation dialog if permission denied
     - Link to app settings if permission permanently denied
     - _Requirements: 6.1, 6.2, 6.3_
   
-  - [ ] 5.2 Implement user-friendly error messages
+  - [x] 5.2 Implement user-friendly error messages
     - Create error message mapping for common scenarios
     - Display toast/alert for recording errors
     - Show specific messages for:

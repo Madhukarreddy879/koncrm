@@ -1,4 +1,4 @@
-import { Platform, PermissionsAndroid, Permission } from 'react-native';
+import { Platform, PermissionsAndroid, Permission, Linking, Alert } from 'react-native';
 
 export type PermissionStatus = 'granted' | 'denied' | 'never_ask_again';
 
@@ -189,6 +189,124 @@ class PermissionService {
         allGranted: false,
       };
     }
+  }
+
+  /**
+   * Check permissions on app launch and show explanation if needed
+   * @returns Promise with boolean indicating if all permissions are granted
+   */
+  async checkPermissionsOnLaunch(): Promise<boolean> {
+    const permissions = await this.checkPermissions();
+    
+    if (permissions.allGranted) {
+      console.log('[PermissionService] All permissions granted');
+      return true;
+    }
+
+    console.log('[PermissionService] Some permissions missing:', permissions);
+    return false;
+  }
+
+  /**
+   * Show explanation dialog for denied permissions
+   * @param permissionType - Type of permission ('call' or 'recording')
+   */
+  showPermissionExplanation(permissionType: 'call' | 'recording'): void {
+    const explanations = {
+      call: {
+        title: 'Phone Call Permission Required',
+        message: 'Education CRM needs permission to make phone calls so you can contact students directly from the app. This permission is essential for the core functionality of the CRM.',
+      },
+      recording: {
+        title: 'Audio Recording Permission Required',
+        message: 'Education CRM needs permission to record calls for quality assurance and training purposes. This helps improve service quality and provides a record of conversations with students.',
+      },
+    };
+
+    const explanation = explanations[permissionType];
+    
+    Alert.alert(
+      explanation.title,
+      explanation.message,
+      [{ text: 'OK' }]
+    );
+  }
+
+  /**
+   * Show dialog to open app settings when permission is permanently denied
+   * @param permissionType - Type of permission ('call' or 'recording')
+   */
+  showSettingsDialog(permissionType: 'call' | 'recording'): void {
+    const messages = {
+      call: 'Phone call permission is required to use this app. Please enable it in Settings.',
+      recording: 'Audio recording permission is required for call recording. Please enable it in Settings to use this feature.',
+    };
+
+    Alert.alert(
+      'Permission Required',
+      messages[permissionType],
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Open Settings',
+          onPress: () => this.openAppSettings(),
+        },
+      ]
+    );
+  }
+
+  /**
+   * Open app settings page
+   */
+  async openAppSettings(): Promise<void> {
+    try {
+      await Linking.openSettings();
+    } catch (error) {
+      console.error('[PermissionService] Failed to open settings:', error);
+      Alert.alert(
+        'Error',
+        'Unable to open settings. Please open Settings manually and grant the required permissions.',
+        [{ text: 'OK' }]
+      );
+    }
+  }
+
+  /**
+   * Request permission with proper handling for denied/never_ask_again states
+   * @param permissionType - Type of permission to request
+   * @returns Promise with permission result
+   */
+  async requestPermissionWithHandling(permissionType: 'call' | 'recording'): Promise<PermissionResult> {
+    // First check if permission is already granted
+    const hasPermission = permissionType === 'call' 
+      ? await this.hasCallPermission()
+      : await this.hasRecordingPermission();
+
+    if (hasPermission) {
+      return {
+        status: 'granted',
+        permission: permissionType === 'call' ? 'CALL_PHONE' : 'RECORD_AUDIO',
+      };
+    }
+
+    // Request permission
+    const result = permissionType === 'call'
+      ? await this.requestCallPermission()
+      : await this.requestRecordingPermission();
+
+    // Handle different permission states
+    if (result.status === 'never_ask_again') {
+      // Permission permanently denied - show settings dialog
+      this.showSettingsDialog(permissionType);
+    } else if (result.status === 'denied') {
+      // Permission denied - show explanation
+      this.showPermissionExplanation(permissionType);
+    }
+
+    return result;
   }
 
   /**
