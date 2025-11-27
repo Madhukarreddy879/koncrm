@@ -118,6 +118,24 @@ export default function LeadDetailScreen() {
     };
   }, [isRecording, recordingTimer]);
 
+  useEffect(() => {
+    // Listen for recording completion to refresh the list
+    const handleRecordingCompleted = (success: boolean) => {
+      if (success) {
+        console.log('Recording completed and uploaded, refreshing lead details');
+        showToast('Recording uploaded successfully');
+        // Force refresh to get new recording
+        fetchLeadDetails();
+      }
+    };
+
+    CallRecordingManager.addRecordingCompletedListener(handleRecordingCompleted);
+
+    return () => {
+      CallRecordingManager.removeRecordingCompletedListener(handleRecordingCompleted);
+    };
+  }, []);
+
   const fetchLeadDetails = async () => {
     try {
       setIsLoading(true);

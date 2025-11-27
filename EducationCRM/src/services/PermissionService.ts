@@ -123,23 +123,83 @@ class PermissionService {
   }
 
   /**
+   * Check if phone state permission is granted
+   * @returns Promise with boolean indicating if permission is granted
+   */
+  async hasPhoneStatePermission(): Promise<boolean> {
+    if (Platform.OS !== 'android') {
+      return true;
+    }
+
+    try {
+      const result = await PermissionsAndroid.check(
+        PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE
+      );
+      return result;
+    } catch (error) {
+      console.error('[PermissionService] Failed to check phone state permission:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Request phone state permission (READ_PHONE_STATE)
+   * @returns Promise with permission status
+   */
+  async requestPhoneStatePermission(): Promise<PermissionResult> {
+    if (Platform.OS !== 'android') {
+      return {
+        status: 'granted',
+        permission: 'READ_PHONE_STATE',
+      };
+    }
+
+    try {
+      const result = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE,
+        {
+          title: 'Phone State Permission',
+          message: 'Education CRM needs access to detect call state for automatic call recording.',
+          buttonNeutral: 'Ask Me Later',
+          buttonNegative: 'Cancel',
+          buttonPositive: 'OK',
+        }
+      );
+
+      return {
+        status: this.mapPermissionResult(result),
+        permission: 'READ_PHONE_STATE',
+      };
+    } catch (error) {
+      console.error('[PermissionService] Failed to request phone state permission:', error);
+      return {
+        status: 'denied',
+        permission: 'READ_PHONE_STATE',
+      };
+    }
+  }
+
+  /**
    * Check all required permissions
    * @returns Promise with object containing status of all permissions
    */
   async checkPermissions(): Promise<{
     call: boolean;
     recording: boolean;
+    phoneState: boolean;
     allGranted: boolean;
   }> {
-    const [call, recording] = await Promise.all([
+    const [call, recording, phoneState] = await Promise.all([
       this.hasCallPermission(),
       this.hasRecordingPermission(),
+      this.hasPhoneStatePermission(),
     ]);
 
     return {
       call,
       recording,
-      allGranted: call && recording,
+      phoneState,
+      allGranted: call && recording && phoneState,
     };
   }
 
@@ -150,12 +210,14 @@ class PermissionService {
   async requestAllPermissions(): Promise<{
     call: PermissionResult;
     recording: PermissionResult;
+    phoneState: PermissionResult;
     allGranted: boolean;
   }> {
     if (Platform.OS !== 'android') {
       return {
         call: { status: 'granted', permission: 'CALL_PHONE' },
         recording: { status: 'granted', permission: 'RECORD_AUDIO' },
+        phoneState: { status: 'granted', permission: 'READ_PHONE_STATE' },
         allGranted: true,
       };
     }
@@ -164,6 +226,7 @@ class PermissionService {
       const results = await PermissionsAndroid.requestMultiple([
         PermissionsAndroid.PERMISSIONS.CALL_PHONE,
         PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+        PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE,
       ]);
 
       const call: PermissionResult = {
@@ -176,16 +239,23 @@ class PermissionService {
         permission: 'RECORD_AUDIO',
       };
 
+      const phoneState: PermissionResult = {
+        status: this.mapPermissionResult(results[PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE]),
+        permission: 'READ_PHONE_STATE',
+      };
+
       return {
         call,
         recording,
-        allGranted: call.status === 'granted' && recording.status === 'granted',
+        phoneState,
+        allGranted: call.status === 'granted' && recording.status === 'granted' && phoneState.status === 'granted',
       };
     } catch (error) {
       console.error('[PermissionService] Failed to request all permissions:', error);
       return {
         call: { status: 'denied', permission: 'CALL_PHONE' },
         recording: { status: 'denied', permission: 'RECORD_AUDIO' },
+        phoneState: { status: 'denied', permission: 'READ_PHONE_STATE' },
         allGranted: false,
       };
     }
@@ -209,9 +279,9 @@ class PermissionService {
 
   /**
    * Show explanation dialog for denied permissions
-   * @param permissionType - Type of permission ('call' or 'recording')
+   * @param permissionType - Type of permission ('call' or 'recording' or 'phoneState')
    */
-  showPermissionExplanation(permissionType: 'call' | 'recording'): void {
+  showPermissionExplanation(permissionType: 'call' | 'recording' | 'phoneState'): void {
     const explanations = {
       call: {
         title: 'Phone Call Permission Required',
@@ -220,6 +290,10 @@ class PermissionService {
       recording: {
         title: 'Audio Recording Permission Required',
         message: 'Education CRM needs permission to record calls for quality assurance and training purposes. This helps improve service quality and provides a record of conversations with students.',
+      },
+      phoneState: {
+        title: 'Phone State Permission Required',
+        message: 'Education CRM needs permission to detect call state for automatic call recording. This allows the app to automatically start and stop recording when calls begin and end.',
       },
     };
 
@@ -234,12 +308,13 @@ class PermissionService {
 
   /**
    * Show dialog to open app settings when permission is permanently denied
-   * @param permissionType - Type of permission ('call' or 'recording')
+   * @param permissionType - Type of permission ('call' or 'recording' or 'phoneState')
    */
-  showSettingsDialog(permissionType: 'call' | 'recording'): void {
+  showSettingsDialog(permissionType: 'call' | 'recording' | 'phoneState'): void {
     const messages = {
       call: 'Phone call permission is required to use this app. Please enable it in Settings.',
       recording: 'Audio recording permission is required for call recording. Please enable it in Settings to use this feature.',
+      phoneState: 'Phone state permission is required for automatic call recording. Please enable it in Settings.',
     };
 
     Alert.alert(
@@ -279,23 +354,27 @@ class PermissionService {
    * @param permissionType - Type of permission to request
    * @returns Promise with permission result
    */
-  async requestPermissionWithHandling(permissionType: 'call' | 'recording'): Promise<PermissionResult> {
+  async requestPermissionWithHandling(permissionType: 'call' | 'recording' | 'phoneState'): Promise<PermissionResult> {
     // First check if permission is already granted
     const hasPermission = permissionType === 'call' 
       ? await this.hasCallPermission()
-      : await this.hasRecordingPermission();
+      : permissionType === 'recording'
+      ? await this.hasRecordingPermission()
+      : await this.hasPhoneStatePermission();
 
     if (hasPermission) {
       return {
         status: 'granted',
-        permission: permissionType === 'call' ? 'CALL_PHONE' : 'RECORD_AUDIO',
+        permission: permissionType === 'call' ? 'CALL_PHONE' : permissionType === 'recording' ? 'RECORD_AUDIO' : 'READ_PHONE_STATE',
       };
     }
 
     // Request permission
     const result = permissionType === 'call'
       ? await this.requestCallPermission()
-      : await this.requestRecordingPermission();
+      : permissionType === 'recording'
+      ? await this.requestRecordingPermission()
+      : await this.requestPhoneStatePermission();
 
     // Handle different permission states
     if (result.status === 'never_ask_again') {

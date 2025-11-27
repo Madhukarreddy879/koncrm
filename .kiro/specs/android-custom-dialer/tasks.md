@@ -1,0 +1,232 @@
+# Implementation Plan
+
+- [x] 1. Set up project structure and Android manifest
+  - Create the `dialer/` package directory under `android/app/src/main/java/com/educationcrm/`
+  - Create subdirectory `dialer/models/` for data classes
+  - Update `AndroidManifest.xml`:
+    - Add new permissions: `MANAGE_OWN_CALLS`, `ANSWER_PHONE_CALLS`
+    - Keep existing permissions unchanged (CALL_PHONE, RECORD_AUDIO, etc. already present)
+    - Add CrmConnectionService declaration with BIND_TELECOM_CONNECTION_SERVICE permission
+    - Add CrmInCallService declaration with BIND_INCALL_SERVICE permission
+    - Add DialerRecordingService declaration with foregroundServiceType="microphone"
+    - Add InCallActivity declaration
+    - Add DIAL intent filters to existing MainActivity
+  - _Requirements: 1.1, 1.2, 1.5, 7.1, 7.2, 7.3, 10.5_
+
+- [x] 2. Implement data models and utilities
+  - [x] 2.1 Create CallState and CallStateEnum data classes
+    - Define `CallState` data class with callId, phoneNumber, leadId, state, timestamps, and flags
+    - Define `CallStateEnum` enum with IDLE, DIALING, RINGING, ACTIVE, HOLDING, DISCONNECTED states
+    - _Requirements: 2.2_
+  - [x] 2.2 Create RecordingResult data class
+    - Define `RecordingResult` with callId, filePath, duration, fileSize, phoneNumber, leadId, timestamp
+    - _Requirements: 4.4, 5.1_
+  - [x] 2.3 Create DialerErrorCodes object
+    - Define error code constants for all error scenarios
+    - _Requirements: 8.1, 8.2, 8.3_
+  - [x] 2.4 Create PermissionHelper utility class
+    - Implement permission check methods for CALL_PHONE, RECORD_AUDIO, READ_PHONE_STATE
+    - Implement permission request methods with rationale dialogs
+    - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5_
+
+- [x] 3. Implement PhoneAccountManager
+  - [x] 3.1 Create PhoneAccountManager singleton object
+    - Implement `registerPhoneAccount()` to register PhoneAccount with TelecomManager
+    - Configure PhoneAccount with CAPABILITY_CALL_PROVIDER and CAPABILITY_SELF_MANAGED
+    - Add TEL URI scheme support
+    - _Requirements: 1.2, 1.5, 2.6_
+  - [x] 3.2 Implement default dialer methods
+    - Implement `isDefaultDialer()` to check current default dialer status
+    - Implement `requestDefaultDialer()` to show system default dialer selection dialog
+    - _Requirements: 1.1, 1.3, 1.4_
+
+- [x] 4. Implement CrmConnectionService and CrmConnection
+  - [x] 4.1 Create CrmConnectionService class
+    - Extend `ConnectionService`
+    - Implement `onCreateOutgoingConnection()` to create CrmConnection instances
+    - Implement `onCreateOutgoingConnectionFailed()` for error handling
+    - _Requirements: 2.1, 2.5_
+  - [x] 4.2 Create CrmConnection class
+    - Extend `Connection`
+    - Implement `onStateChanged()` to track DIALING, ACTIVE, DISCONNECTED states
+    - Implement `onDisconnect()` and `onAbort()` for call termination
+    - Implement `onHold()` and `onUnhold()` for hold functionality
+    - Implement `onPlayDtmfTone()` and `onStopDtmfTone()` for DTMF support
+    - _Requirements: 2.2, 2.3, 2.4, 2.7_
+  - [x] 4.3 Implement call state event emission
+    - Create mechanism to emit call state changes to DialerBridgeModule
+    - Trigger recording start when state becomes ACTIVE
+    - Trigger recording stop when state becomes DISCONNECTED
+    - _Requirements: 2.2, 2.3, 2.4, 4.1, 4.3_
+
+- [x] 5. Implement DialerRecordingService
+  - [x] 5.1 Create DialerRecordingService foreground service
+    - Extend `Service` (separate from existing RecordingService.kt)
+    - Implement `onStartCommand()` to start foreground service with notification
+    - Create notification channel for call recording notifications
+    - Display persistent notification with recording indicator
+    - Note: This is a new service specifically for dialer-initiated recordings
+    - _Requirements: 10.1, 10.2, 10.3_
+  - [x] 5.2 Implement MediaRecorder setup
+    - Configure MediaRecorder with AudioSource.VOICE_RECOGNITION
+    - Set output format to MPEG_4 with AAC encoder
+    - Set sample rate to 44100 Hz and bitrate to 128 kbps
+    - Call `setPrivacySensitive(false)` on Android 11+
+    - Match existing RecordingService.kt audio configuration for consistency
+    - _Requirements: 4.1, 4.2, 4.7_
+  - [x] 5.3 Implement recording lifecycle methods
+    - Implement `startRecording(callId, phoneNumber, leadId)` method
+    - Implement `stopRecording()` method returning RecordingResult
+    - Create output file with naming convention `call_{timestamp}_{phone}.m4a`
+    - Handle MediaRecorder errors gracefully
+    - Emit events to DialerBridgeModule for React Native
+    - _Requirements: 4.1, 4.3, 4.4, 4.5, 4.6_
+  - [x] 5.4 Implement storage management
+    - Check available storage before starting recording
+    - Warn if storage is below 100MB threshold
+    - Save recordings to app's private files directory (same location as existing recordings)
+    - _Requirements: 8.3_
+
+- [x] 6. Implement CallManager singleton
+  - [x] 6.1 Create CallManager object
+    - Maintain current call state
+    - Provide methods: `getCurrentCall()`, `setCurrentCall()`, `clearCurrentCall()`
+    - _Requirements: 2.2_
+  - [x] 6.2 Implement call control methods
+    - Implement `endCurrentCall()` to disconnect active call
+    - Implement `toggleMute()` to mute/unmute microphone
+    - Implement `toggleSpeaker()` to enable/disable speaker
+    - Implement `holdCall()` and `unholdCall()` for hold functionality
+    - _Requirements: 3.3, 3.4_
+
+- [x] 7. Implement InCallActivity
+  - [x] 7.1 Create activity_in_call.xml layout
+    - Design layout with phone number display, call duration timer
+    - Add recording indicator (red dot with "Recording" text)
+    - Add mute, speaker, and end call buttons
+    - Style with dark theme appropriate for in-call screen
+    - _Requirements: 3.2, 3.3_
+  - [x] 7.2 Create InCallActivity class
+    - Implement `onCreate()` to setup UI and bind to call state
+    - Implement call duration timer that updates every second
+    - Implement button click handlers for mute, speaker, end call
+    - Update UI based on call state changes
+    - _Requirements: 3.1, 3.2, 3.3, 3.4_
+  - [x] 7.3 Implement call notification
+    - Create high-priority notification for ongoing call
+    - Add notification actions for mute and end call
+    - Show notification when app goes to background
+    - _Requirements: 3.5_
+
+- [x] 8. Implement DialerBridgeModule
+  - [x] 8.1 Create DialerPackage class
+    - Implement `ReactPackage` interface
+    - Register DialerBridgeModule in `createNativeModules()`
+    - _Requirements: 6.1_
+  - [x] 8.2 Create DialerBridgeModule class
+    - Extend `ReactContextBaseJavaModule`
+    - Implement `getName()` returning "DialerBridge"
+    - Setup event emitter for sending events to React Native
+    - _Requirements: 6.2_
+  - [x] 8.3 Implement exposed methods
+    - Implement `makeCall(phoneNumber, leadId, promise)` with phone number validation
+    - Implement `requestDefaultDialer(promise)` to trigger system dialog
+    - Implement `isDefaultDialer(promise)` to check status
+    - Implement `endCurrentCall(promise)` to end active call
+    - Implement `toggleMute(promise)` and `toggleSpeaker(promise)`
+    - _Requirements: 6.1, 6.3, 6.4, 6.5_
+  - [x] 8.4 Implement event emission
+    - Emit CALL_STARTED event with callId, phoneNumber, leadId
+    - Emit CALL_CONNECTED event with callId, phoneNumber
+    - Emit CALL_ENDED event with callId, phoneNumber, duration
+    - Emit RECORDING_STARTED event with callId
+    - Emit RECORDING_STOPPED event with callId, filePath, duration, fileSize
+    - Emit RECORDING_ERROR event with callId, error, code
+    - _Requirements: 6.2_
+
+- [ ] 9. Register native module with React Native
+  - [ ] 9.1 Update MainApplication.kt
+    - Import DialerPackage from dialer package
+    - Add `DialerPackage()` to existing packages list (alongside AudioRecorderPackage, AccessibilityPackage)
+    - Verify existing packages still work after addition
+    - _Requirements: 6.1_
+  - [ ] 9.2 Verify Android build configuration
+    - Confirm compileSdkVersion is 36 (already set in build.gradle)
+    - Confirm targetSdkVersion is 36 (already set)
+    - Confirm minSdkVersion is 24 (already set, supports Telecom API)
+    - Verify existing permissions in AndroidManifest.xml are compatible
+    - _Requirements: 1.1, 7.1, 7.2, 7.3_
+
+- [ ] 10. Create TypeScript wrapper and types
+  - [ ] 10.1 Create DialerTypes.ts in src/types/
+    - Define TypeScript interfaces for all event payloads
+    - Define CallStartedEvent, CallConnectedEvent, CallEndedEvent interfaces
+    - Define RecordingStartedEvent, RecordingStoppedEvent, RecordingErrorEvent interfaces
+    - Ensure RecordingStoppedEvent includes leadId, phoneNumber, timestamp for upload compatibility
+    - _Requirements: 6.2_
+  - [ ] 10.2 Create DialerService.ts in src/services/
+    - Import NativeModules and NativeEventEmitter from react-native
+    - Create typed wrapper for DialerBridge native module
+    - Implement `makeCall(phoneNumber, leadId)` async method with error handling
+    - Implement `requestDefaultDialer()` and `isDefaultDialer()` methods
+    - Implement event subscription methods with proper typing and cleanup
+    - Add singleton pattern to prevent multiple event listeners
+    - Follow same patterns as existing AccessibilityService.ts
+    - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5_
+
+- [ ] 11. Integrate with existing CRM
+  - [ ] 11.1 Update CallRecordingManager.ts (primary integration point)
+    - Import DialerService from '../services/DialerService'
+    - Add `isDefaultDialer()` check at start of `handleCallWithRecording()`
+    - When default dialer: use `DialerService.makeCall(phoneNumber, leadId)`
+    - When not default dialer: keep existing `CallHelper.initiateCall()` flow
+    - Subscribe to dialer events (CALL_ENDED, RECORDING_STOPPED) for upload handling
+    - Reuse existing `uploadRecording()` method for dialer recordings
+    - _Requirements: 9.1, 9.2_
+  - [ ] 11.2 Update LeadDetailScreen.tsx
+    - Import DialerService and event types
+    - Subscribe to dialer events (RECORDING_STOPPED) on component mount
+    - Handle RECORDING_STOPPED event to trigger upload via existing RecordingUploadService
+    - Refresh call history using existing `fetchLeadDetails()` after upload
+    - Unsubscribe from events on component unmount
+    - Note: Existing recording UI (RecordingList, playback controls) works unchanged
+    - _Requirements: 9.1, 9.2, 9.4_
+  - [ ] 11.3 Update RecordingUploadService.ts
+    - Add `uploadDialerRecording(recordingEvent: RecordingStoppedEvent)` method
+    - Reuse existing `uploadRecording()` with file path from native event
+    - Use existing S3Service.uploadRecording() infrastructure
+    - Associate recording with leadId from event payload
+    - Maintain compatibility with existing recording format
+    - _Requirements: 5.1, 5.2, 5.3, 9.2_
+  - [ ] 11.4 Verify RecordingList.tsx compatibility
+    - Confirm component displays recordings from both old and new systems
+    - Verify existing AudioPlayerService works for dialer recordings
+    - No code changes expected - just verification
+    - _Requirements: 9.3, 9.5_
+
+- [ ] 12. Add drawable resources
+  - [ ] 12.1 Create vector drawable icons
+    - Create ic_call_end.xml (red phone icon)
+    - Create ic_mic.xml and ic_mic_off.xml (microphone icons)
+    - Create ic_speaker.xml (speaker icon)
+    - Create ic_recording.xml (red recording dot)
+    - _Requirements: 3.2, 3.3_
+
+- [ ] 13. Add string resources
+  - [ ] 13.1 Update strings.xml
+    - Add dialer-related strings: "Recording", "Mute", "Speaker", "End Call"
+    - Add permission rationale strings
+    - Add error message strings
+    - _Requirements: 7.1, 7.2, 7.3_
+
+- [ ]* 14. Write unit tests for core components
+  - [ ]* 14.1 Test PhoneAccountManager
+    - Test PhoneAccount registration
+    - Test default dialer detection
+  - [ ]* 14.2 Test CallRecordingService
+    - Test MediaRecorder configuration
+    - Test file naming convention
+    - Test recording lifecycle
+  - [ ]* 14.3 Test DialerBridgeModule
+    - Test phone number validation
+    - Test event emission

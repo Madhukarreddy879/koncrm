@@ -1,14 +1,20 @@
-import { Alert, AppState, AppStateStatus } from 'react-native';
+import { Alert, AppState, AppStateStatus, DeviceEventEmitter, Platform } from 'react-native';
 import CallHelper from '../utils/CallHelper';
 import RecordingService, { RecordingMetadata } from '../services/RecordingService';
 import PermissionService from '../services/PermissionService';
 import LeadService from '../services/LeadService';
 import RecordingUploadService from '../services/RecordingUploadService';
 import ErrorMessageService from '../services/ErrorMessageService';
+import AccessibilityService from '../services/AccessibilityService';
+import CallRecordingEventService from '../services/CallRecordingEventService';
 
 /**
  * CallRecordingManager - Coordinates call initiation and recording
  * Handles the complete workflow: permissions, call, recording, and upload
+ * 
+ * Recording Modes:
+ * 1. Accessibility Service Mode (preferred): Auto-records all calls when enabled
+ * 2. Manual Mode: App-controlled recording with app state detection
  */
 class CallRecordingManager {
   private appStateSubscription: any = null;
@@ -20,12 +26,45 @@ class CallRecordingManager {
   private uploadProgress: number = 0;
   private callInitiatedTime: number = 0;
   private appWentToBackground: boolean = false;
+  private useAccessibilityService: boolean = false;
 
   constructor() {
     // Initialize upload service
     RecordingUploadService.initialize().catch(error => {
       console.error('[CallRecordingManager] Failed to initialize upload service:', error);
     });
+
+    // Initialize call recording event service
+    CallRecordingEventService.initialize();
+
+    // Check if accessibility service is available
+    this.checkAccessibilityServiceStatus();
+  }
+
+  /**
+   * Check if accessibility service is enabled for auto-recording
+   */
+  private async checkAccessibilityServiceStatus(): Promise<void> {
+    if (Platform.OS !== 'android') {
+      this.useAccessibilityService = false;
+      return;
+    }
+
+    try {
+      this.useAccessibilityService = await AccessibilityService.isAccessibilityServiceEnabled();
+      console.log(`[CallRecordingManager] Accessibility service enabled: ${this.useAccessibilityService}`);
+    } catch (error) {
+      console.error('[CallRecordingManager] Error checking accessibility service:', error);
+      this.useAccessibilityService = false;
+    }
+  }
+
+  /**
+   * Check if accessibility service mode is active
+   */
+  async isAccessibilityModeActive(): Promise<boolean> {
+    await this.checkAccessibilityServiceStatus();
+    return this.useAccessibilityService;
   }
 
   /**
@@ -52,20 +91,33 @@ class CallRecordingManager {
       // Step 2: Store lead ID for later use
       this.currentLeadId = leadId;
 
-      // Step 3: Initiate the call FIRST
-      await CallHelper.initiateCall(phoneNumber);
-
-      // Step 4: Set up app state listener to detect when user returns
-      this.setupAppStateListener();
-
-      // Step 5: Log call attempt
+      // Step 3: Log call attempt BEFORE initiating call
       await this.logCallAttempt(leadId);
 
-      // Step 6: Start recording AFTER call is initiated (with delay)
-      // This gives time for the call to connect and avoids recording pre-call time
-      if (autoRecord && permissionsGranted.recording) {
+      // Step 3.5: Set lead and call log in event service for accessibility recording
+      CallRecordingEventService.setCurrentLead(leadId);
+      if (this.currentCallLogId) {
+        CallRecordingEventService.setCurrentCallLog(this.currentCallLogId);
+      }
+
+      // Step 4: Check if accessibility service is handling recording
+      await this.checkAccessibilityServiceStatus();
+
+      // Step 5: Initiate the call
+      await CallHelper.initiateCall(phoneNumber);
+
+      // Step 6: Set up app state listener to detect when user returns
+      this.setupAppStateListener();
+
+      // Step 7: Handle recording based on mode
+      if (this.useAccessibilityService) {
+        // Accessibility service will auto-start recording when call connects
+        console.log('[CallRecording] Accessibility service will handle recording automatically');
+        // Recording will be handled by CallRecordingAccessibilityService
+      } else if (autoRecord && permissionsGranted.recording) {
+        // Fallback: Manual recording mode
         // Wait 3 seconds for call to connect before starting recording
-        // This delay allows the dialer to open and call to start connecting
+        console.log('[CallRecording] Using manual recording mode (accessibility service not enabled)');
         setTimeout(async () => {
           try {
             await this.startRecording();
@@ -222,6 +274,12 @@ class CallRecordingManager {
 
         // Clean up local file after successful upload
         await RecordingService.deleteRecording(metadata.filePath);
+
+        // Invalidate cache so UI fetches fresh data
+        LeadService.clearLeadCache(leadId);
+
+        // Notify listeners
+        this.notifyListeners(true);
       } else {
         throw new Error(result.error || 'Upload failed');
       }
@@ -236,6 +294,39 @@ class CallRecordingManager {
     } finally {
       this.uploadInProgress = false;
     }
+  }
+
+  // Event Listeners
+  private listeners: ((success: boolean) => void)[] = [];
+
+  /**
+   * Add listener for recording completion
+   * @param callback - Function to call when recording upload completes
+   */
+  addRecordingCompletedListener(callback: (success: boolean) => void): void {
+    this.listeners.push(callback);
+  }
+
+  /**
+   * Remove listener
+   * @param callback - Function to remove
+   */
+  removeRecordingCompletedListener(callback: (success: boolean) => void): void {
+    this.listeners = this.listeners.filter(l => l !== callback);
+  }
+
+  /**
+   * Notify listeners of completion
+   * @param success - Whether upload was successful
+   */
+  private notifyListeners(success: boolean): void {
+    this.listeners.forEach(listener => {
+      try {
+        listener(success);
+      } catch (error) {
+        console.error('[CallRecordingManager] Error in listener:', error);
+      }
+    });
   }
 
   /**
@@ -271,7 +362,7 @@ class CallRecordingManager {
 
       // Request call permission with proper handling
       const callResult = await PermissionService.requestPermissionWithHandling('call');
-      
+
       // Request recording permission with proper handling
       const recordingResult = await PermissionService.requestPermissionWithHandling('recording');
 
@@ -296,6 +387,11 @@ class CallRecordingManager {
         duration_seconds: 0,
       });
       this.currentCallLogId = callLog.id;
+      
+      // Update event service with call log ID
+      CallRecordingEventService.setCurrentCallLog(callLog.id);
+      
+      console.log('[CallRecordingManager] Call log created:', callLog.id);
     } catch (error) {
       console.error('Failed to log call attempt:', error);
       // Don't throw - this is not critical
@@ -328,12 +424,12 @@ class CallRecordingManager {
    */
   private async handleAppStateChange(nextAppState: AppStateStatus): Promise<void> {
     const timeSinceCallInitiated = Date.now() - this.callInitiatedTime;
-    
+
     console.log(`[CallRecording] App state changed to: ${nextAppState}`);
     console.log(`[CallRecording] Time since call initiated: ${timeSinceCallInitiated}ms`);
     console.log(`[CallRecording] App went to background: ${this.appWentToBackground}`);
     console.log(`[CallRecording] Recording in progress: ${RecordingService.isCurrentlyRecording()}`);
-    
+
     // Track when app goes to background (dialer opens)
     if (nextAppState === 'background' || nextAppState === 'inactive') {
       console.log('[CallRecording] App went to background/inactive - dialer opened');
@@ -349,9 +445,9 @@ class CallRecordingManager {
       // 1. App actually went to background (dialer was opened)
       // 2. At least 3 seconds have passed (to avoid stopping immediately)
       // 3. Recording is still in progress
-      if (this.appWentToBackground && 
-          timeSinceCallInitiated > 3000 && 
-          RecordingService.isCurrentlyRecording()) {
+      if (this.appWentToBackground &&
+        timeSinceCallInitiated > 3000 &&
+        RecordingService.isCurrentlyRecording()) {
         console.log('[CallRecording] Stopping recording - call appears to be complete');
         try {
           await this.stopRecording(true);
@@ -395,6 +491,7 @@ class CallRecordingManager {
    */
   destroy(): void {
     RecordingUploadService.cleanup();
+    CallRecordingEventService.cleanup();
   }
 
   /**
@@ -403,7 +500,7 @@ class CallRecordingManager {
    */
   private handleRecordingFailure(error: any): void {
     console.error('Recording failure:', error);
-    ErrorMessageService.handleError(error, false, 
+    ErrorMessageService.handleError(error, false,
       'Recording failed. The call will continue without recording.'
     );
   }
